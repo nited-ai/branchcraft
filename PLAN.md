@@ -203,32 +203,80 @@ User can override per-branch via a small color-picker on the branch label.
 
 ### 4.1 Overall layout
 
+Vertical-flowing graph (newer commits at top), worktree cards attached to their HEAD commits as inline children, AI sessions hanging from those worktree cards. **Both sidebars are collapsible.**
+
 ```
-┌──────────┬───────────────────────────────────────┬───────────────────┐
-│          │                                       │  🎒 Stash         │
-│  Repos   │                                       │  ───────────────  │
-│  (Hub)   │            GRAPH (60%+ width)         │  stash@{0} WIP UI │
-│          │                                       │  stash@{1} dirty  │
-│  ⬢ A     │                                       ├───────────────────┤
-│  ⬢ B     │   ●─●─●─●  main (#PR42)               │  🏷  Tags         │
-│  ⬢ C ←   │            ╲                          │  ───────────────  │
-│  ⬢ D     │             ●─●  feat/SEN-205         │  v0.4.2-rc1       │
-│          │                                       │  v0.4.1           │
-│  + add   │                                       ├───────────────────┤
-│          │   [Worktree boxes inline at branches] │  ⏪ Reflog        │
-│          │                                       │  ───────────────  │
-│  Hub     │                                       │  HEAD@{2} reset   │
-│  toggle  │                                       │  HEAD@{5} merge   │
-│          ├───────────────────────────────────────┤                   │
-│          │  Sessions (live across all visible)   ├───────────────────┤
-│          │  🟢 j0k1l2 modest-darwin Claude       │  ⌨ + Command      │
-│          │  🟢 g7h8i9 SEN-205 Codex              │                   │
-│          │  ⚪ a1b2c3 main idle Aider 3h         │                   │
-├──────────┴───────────────────────────────────────┴───────────────────┤
-│  Queue: [git rebase main] [git push --force-with-lease] [Apply All]  │
-│         ↳ slides up from bottom when ≥1 command queued                │
-└──────────────────────────────────────────────────────────────────────┘
+┌──┬──────────────────────────────────────────────────┬───┐
+│ ◀│                                                  │  ▶│
+│  │                                                  │   │
+│ R│   ●  74487b8  main "feat(workflow): intercept…" │ S │
+│ e│   │  ┌─[📁 main · clean · 0↑ 0↓]                 │ t │
+│ p│   │  ├─ 🟢 j0k1l2 [CC] "Design review"          │ a │
+│ o│   │  └─ ⚪ a1b2c3 [AI] idle 3h                   │ s │
+│ s│   ●                                              │ h │
+│  │   │                                              │   │
+│ ◆│   ●  806e283                                     │ T │
+│ b│   │ ╲                                            │ a │
+│ ◯│   │  ●  9ab12cd  feat/SEN-205 "portrait fix"     │ g │
+│ S│   │  │  ┌─[📁 bold-euler · 2 dirty · 2↑ 1↓]      │ s │
+│ ◯│   │  │  └─ 🟢 g7h8i9 [CX] LIVE 2h               │   │
+│ d│   │  ●  a11f00d                                  │ R │
+│ ◆│   │  │                                           │ e │
+│ K│   ●  4fe099a  feat/SEN-208 (3 behind origin)     │ f │
+│  │   │  ┌─[📁 zealous-bose · clean]                 │ l │
+│ +│   │  └─ (no active sessions)                     │ o │
+│  │   ●                                              │ g │
+│  │                                                  │   │
+│  │                                                  │ + │
+├──┴──────────────────────────────────────────────────┴───┤
+│  Queue: [rebase main] [push --force-with-lease] [▶ All] │
+└─────────────────────────────────────────────────────────┘
 ```
+
+**Three regions:**
+
+1. **Left sidebar — Repo Hub** (collapsible). Pinned repos with status indicators (◆ dirty, ⚠ stale, ◯ clean). `+ Add repo`. Click to switch. Collapsed: 32px tab with icons only.
+2. **Center — Graph** (always visible, fills available space). Vertical-flow commit graph. Worktree cards inline at their HEAD commit. Sessions hang as tree children under their worktree.
+3. **Right sidebar — Rucksacks** (collapsible). 🎒 Stash, 🏷 Tags, ⏪ Reflog, ⌨ + Command. Each section independently collapsible.
+
+The Queue panel slides up from the bottom when ≥1 command is queued.
+
+**Why this IA:**
+- A session belongs **to a worktree**, not to a branch. The grouping is now visually obvious — "session → worktree → branch + commit" is one glance.
+- Worktree-to-HEAD connection is explicit: the worktree card sits adjacent to the exact commit it's checked out on.
+- Collapsible sidebars: when focused on the graph (inspecting divergence, queuing a rebase) the side panels vanish so the graph gets the full canvas.
+
+### 4.1.1 Worktree cards
+
+Each card shows:
+- Folder name (last segment of worktree path)
+- Sync status (`clean` / `N dirty files`)
+- Ahead / behind count vs upstream (`2↑ 1↓`)
+- A subtle 1px dotted line connecting the card to its HEAD commit dot
+
+Hover the card → commit dot pulses gently.
+Click the card → opens a side panel with full path, dirty-file list, last operation, fork-point details.
+
+### 4.1.2 Session pills under worktrees
+
+Each session pill shows:
+- Status dot: 🟢 LIVE (mtime < 2 min), ⚪ idle, ⚫ dead (>7 days, hidden by default)
+- Provider badge: 2-letter monospace abbreviation — `CC` (Claude Code), `CL` (Claude CLI), `CX` (Codex CLI), `CD` (Codex Desktop), `GM` (Gemini), `AI` (Aider)
+- Session ID (first 6 chars, monospace)
+- Title (first user message, truncated ~30 chars)
+- Age since last activity
+
+Click a pill → opens transcript side panel (last N messages).
+
+Sessions group under their parent worktree. If a worktree has 5+ sessions, the list scrolls within the card's allocated height (max ~120px before scroll).
+
+### 4.1.3 Collapsibility
+
+- **Repo Hub (left):** chevron toggle at top → slides shut to 32px tab. Re-open by clicking tab.
+- **Rucksack stack (right):** same, plus each section (Stash / Tags / Reflog / + Command) has independent collapse toggle.
+- **Persistence:** state stored in `~/.branchcraft/config.json` (global hub state) and per-repo state (rucksack section preferences memorized per repo).
+- **Keyboard:** `[` toggles left sidebar, `]` toggles right.
+- **Auto-collapse:** on viewports <1280px wide, both default to collapsed; user can still open manually.
 
 ### 4.2 Drag gestures (complete table)
 
