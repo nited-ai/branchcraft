@@ -16,8 +16,8 @@
   const COMMIT_R = 4;
   const HEAD_R = 6;
   const CARD_H = 30;
-  const HINT_H = 22;
-  const CARD_GAP = 6;
+  const HINT_H = 16;
+  const CARD_GAP = 4;
 
   const laneX = (lane: number): number => PAD + lane * LANE_W + LANE_W / 2;
 
@@ -224,8 +224,8 @@
       <WorktreeCard worktree={card.worktree} />
     </div>
     <div class="session-hint" style="top: {card.sessionHintTop}px;">
-      <span class="hint-glyph mono" aria-hidden="true">└─</span>
-      <span class="dim">no active sessions</span>
+      <span class="hint-glyph mono" aria-hidden="true">·</span>
+      <span class="dim">no sessions</span>
     </div>
   {/each}
 </div>
@@ -334,13 +334,13 @@
     display: flex;
     align-items: center;
     gap: var(--s2);
-    height: 22px;
-    font-size: 12px;
+    height: 16px;
+    font-size: 11px;
   }
 
   .hint-glyph {
     color: var(--text-secondary);
-    opacity: 0.6;
+    opacity: 0.4;
   }
 
   .dim {

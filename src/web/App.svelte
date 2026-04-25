@@ -197,8 +197,10 @@
       {:else}
         <p class="dim">
           Repo: <span class="mono">{activeRepoPath ?? '…'}</span> ·
-          <span class="mono">{graphCommits.length}</span> commits ·
-          <span class="mono">{laneCount}</span> lanes
+          <span class="mono">{graphCommits.length}</span>
+          {graphCommits.length === 1 ? 'commit' : 'commits'} ·
+          <span class="mono">{laneCount}</span>
+          {laneCount === 1 ? 'lane' : 'lanes'}
         </p>
 
         <Graph commits={graphCommits} {laneCount} {worktrees} />
@@ -222,15 +224,15 @@
 <style>
   .layout {
     display: grid;
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: 240px 1fr;
     min-height: 100vh;
   }
 
   main {
-    padding: var(--s7) var(--s5);
+    padding: var(--s5);
     display: flex;
     flex-direction: column;
-    gap: var(--s7);
+    gap: var(--s5);
     max-width: 1200px;
   }
 

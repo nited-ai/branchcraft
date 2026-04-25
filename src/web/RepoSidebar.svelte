@@ -37,9 +37,15 @@
             title={r.path}
           >
             <span class={`dot dot-${r.status}`} aria-hidden="true"></span>
-            <span class="name">{r.name}</span>
-            <span class="status mono" class:warn={r.status === 'stale'} class:dirty={r.status === 'dirty'}>
-              {statusLabel(r)}
+            <span class="text">
+              <span class="name">{r.name}</span>
+              <span
+                class="status mono"
+                class:warn={r.status === 'stale'}
+                class:dirty={r.status === 'dirty'}
+              >
+                {statusLabel(r)}
+              </span>
             </span>
           </button>
         </li>
@@ -104,8 +110,8 @@
 
   .repo {
     display: grid;
-    grid-template-columns: 12px 1fr auto;
-    align-items: center;
+    grid-template-columns: 12px 1fr;
+    align-items: start;
     gap: var(--s2);
     width: 100%;
     padding: var(--s2) var(--s3);
@@ -128,17 +134,31 @@
     border-color: var(--branch-2);
   }
 
+  .dot {
+    /* The flex/grid is `align: start`; nudge the dot to the row's optical center. */
+    margin-top: 6px;
+  }
+
+  .text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
   .name {
     font-size: 13px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
   }
 
   .status {
     font-size: 10px;
     color: var(--text-secondary);
     text-transform: lowercase;
+    letter-spacing: 0.02em;
   }
 
   .status.warn {
@@ -154,6 +174,7 @@
     height: 8px;
     border-radius: 50%;
     background: var(--text-secondary);
+    flex-shrink: 0;
   }
 
   .dot-clean {
