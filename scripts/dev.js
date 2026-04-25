@@ -12,7 +12,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 function run(label, command, args) {
   const child = spawn(command, args, {
     cwd: root,
-    stdio: 'inherit',
+    // Ignore stdin so children don't exit on EOF when run under a non-TTY
+    // parent (e.g. preview servers that pipe stdio). stdout/stderr inherit
+    // so output flushes immediately on Windows — see CLAUDE.md gotchas.
+    stdio: ['ignore', 'inherit', 'inherit'],
     shell: process.platform === 'win32',
   });
   child.on('exit', (code, signal) => {

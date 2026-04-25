@@ -11,6 +11,8 @@ out/
 .svelte-kit/
 .vite/
 *.tsbuildinfo
+vite.config.ts.timestamp-*.mjs
+vite.config.js.timestamp-*.mjs
 
 # Runtime / cache
 .cache/

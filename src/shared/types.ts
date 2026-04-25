@@ -27,3 +27,38 @@ export interface ApiWorktrees {
   repoPath: string;
   worktrees: Worktree[];
 }
+
+export type RefKind = 'branch' | 'remote' | 'tag' | 'head' | 'stash';
+
+export interface RefDecoration {
+  kind: RefKind;
+  /** Branch/tag/remote name. Null only for a bare detached HEAD. */
+  name: string | null;
+}
+
+export interface Commit {
+  sha: string;
+  parents: string[];
+  author: string;
+  authorEmail: string;
+  /** Author timestamp in unix seconds. */
+  authorDate: number;
+  subject: string;
+  refs: RefDecoration[];
+}
+
+export interface LaidOutCommit extends Commit {
+  /** Vertical position (0 = newest at top). */
+  row: number;
+  /** Horizontal lane index (0 = leftmost). */
+  lane: number;
+  /** Lane assigned to each parent, in the same order as `parents`. */
+  parentLanes: number[];
+}
+
+export interface ApiGraph {
+  repoPath: string;
+  /** Number of lanes the layout uses (max lane index + 1). */
+  laneCount: number;
+  commits: LaidOutCommit[];
+}
