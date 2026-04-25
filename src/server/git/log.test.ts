@@ -45,7 +45,6 @@ describe('parseGitLog', () => {
     expect(result[0]?.parents).toEqual(['bbbb']);
     expect(result[0]?.refs).toEqual([
       { kind: 'head', name: 'main' },
-      { kind: 'branch', name: 'main' },
       { kind: 'remote', name: 'origin/main' },
     ]);
     expect(result[2]?.refs).toEqual([{ kind: 'tag', name: 'v0.1' }]);
@@ -97,9 +96,17 @@ describe('parseDecoration', () => {
     expect(parseDecoration('   ')).toEqual([]);
   });
 
-  it('expands "HEAD -> main" into both head and branch refs', () => {
+  it('treats "HEAD -> main" as a single head ref (no duplicate branch pill)', () => {
     expect(parseDecoration('HEAD -> main')).toEqual([
       { kind: 'head', name: 'main' },
+    ]);
+  });
+
+  it('keeps a sibling branch ref when listed separately from HEAD', () => {
+    // Detached HEAD where `main` happens to point at the same commit:
+    //   "HEAD, main" — distinct refs, both should render.
+    expect(parseDecoration('HEAD, main')).toEqual([
+      { kind: 'head', name: null },
       { kind: 'branch', name: 'main' },
     ]);
   });

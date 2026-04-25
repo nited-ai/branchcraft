@@ -309,9 +309,15 @@
 
   .connector {
     position: absolute;
-    width: 1px;
-    border-left: 1px dotted var(--text-secondary);
-    opacity: 0.6;
+    width: 2px;
+    background-image: linear-gradient(
+      to bottom,
+      var(--branch-2) 0 3px,
+      transparent 3px 6px
+    );
+    background-size: 2px 6px;
+    background-repeat: repeat-y;
+    opacity: 0.55;
     pointer-events: none;
   }
 

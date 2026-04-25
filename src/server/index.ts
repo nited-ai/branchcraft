@@ -72,10 +72,20 @@ app.get('/api/graph', async (c) => {
   return c.json(body);
 });
 
-// Serve built frontend in production (when dist/web exists).
+// Serve built frontend in production. In dev (`tsx watch`) `__dirname`
+// resolves to `src/server/`, so `../web` points at `src/web/` (the source
+// tree, not a build). That's harmless to detect by directory, but serving
+// it would yield .ts files with the wrong MIME — confusing the browser.
+// Require both `index.html` and the Vite-emitted `assets/` directory so we
+// only ever serve a real build.
 const distWebDir = resolve(__dirname, '../web');
-if (existsSync(distWebDir) && statSync(distWebDir).isDirectory()) {
-  // Lazy import so dev doesn't load this branch.
+const distIndex = resolve(distWebDir, 'index.html');
+const distAssets = resolve(distWebDir, 'assets');
+if (
+  existsSync(distIndex) &&
+  existsSync(distAssets) &&
+  statSync(distAssets).isDirectory()
+) {
   const { serveStatic } = await import('@hono/node-server/serve-static');
   app.use('/*', serveStatic({ root: distWebDir }));
   app.get('*', serveStatic({ path: `${distWebDir}/index.html` }));

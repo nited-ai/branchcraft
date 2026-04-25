@@ -63,9 +63,10 @@ export function parseDecoration(decoration: string): RefDecoration[] {
     if (token === 'HEAD') {
       out.push({ kind: 'head', name: null });
     } else if (token.startsWith('HEAD -> ')) {
-      const name = token.slice('HEAD -> '.length);
-      out.push({ kind: 'head', name });
-      out.push({ kind: 'branch', name });
+      // `HEAD -> main` = HEAD points to local branch `main` at this commit.
+      // Emit only the head ref — emitting a separate branch ref with the
+      // same name would render as a duplicate pill in the UI.
+      out.push({ kind: 'head', name: token.slice('HEAD -> '.length) });
     } else if (token.startsWith('tag: ')) {
       out.push({ kind: 'tag', name: token.slice('tag: '.length) });
     } else if (token === 'refs/stash') {
