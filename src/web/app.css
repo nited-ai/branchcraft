@@ -1,0 +1,96 @@
+/* branchcraft — global styles
+ * Aesthetic direction: "Refined GitKraken" — see PLAN.md §3.
+ */
+
+:root {
+  /* Colors — dark mode (default) */
+  --bg: #0d0e12;
+  --bg-elevated: #14161c;
+  --text-primary: #f0e6d2;
+  --text-secondary: rgba(240, 230, 210, 0.55);
+  --hairline: rgba(212, 165, 74, 0.25);
+
+  /* Branch palette (10 slots, deuteranopia-safe, uniform luminance) */
+  --branch-0: #a4b9e6; /* indigo — main/master */
+  --branch-1: #9bbf9b; /* sage — release */
+  --branch-2: #d4a54a; /* amber — hotfix */
+  --branch-3: #e09a8a; /* coral — breaking */
+  --branch-4: #7ab3e5; /* sky — feature */
+  --branch-5: #b59ad4; /* plum — refactor */
+  --branch-6: #a8b07a; /* olive — chore */
+  --branch-7: #8a96a8; /* slate — docs/meta */
+  --branch-8: #d4a4b9; /* rose — experiments */
+  --branch-9: #7ab3b3; /* teal — preview/simulation */
+
+  /* Semantic accents */
+  --success: #6db26d;
+  --warning: #d4a54a;
+  --danger: #cc6677;
+
+  /* Typography */
+  --font-display: 'Manrope', 'Inter', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Spacing scale */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+}
+
+[data-theme='light'] {
+  --bg: #fafaf9;
+  --bg-elevated: #ffffff;
+  --text-primary: #1a1614;
+  --text-secondary: rgba(26, 22, 20, 0.55);
+  --hairline: rgba(138, 109, 42, 0.25);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+}
+
+a {
+  color: var(--branch-2);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--hairline);
+}
+
+a:hover {
+  border-bottom-style: solid;
+}
+
+::selection {
+  background: var(--branch-2);
+  color: var(--bg);
+}

@@ -425,29 +425,47 @@ Repos (5)
 
 ## 6. Tech Stack
 
-**Backend:**
-- **Bun** runtime — fast startup, native FS watch, native WebSocket, single binary distribution
-- **Hono** framework — lightweight, web-standards API
-- Native `git` shell-out via `Bun.spawn`
-- File watching via `Bun.watch`
-- WebSocket via Hono adapter
+**Backend (primary: Node 20+, Bun-compatible):**
+- **Node 20+** runtime — broad install base, mature ecosystem, npm distribution friendly
+- Optional: **Bun** as alternative runtime (Hono is portable; one codebase runs on both)
+- **Hono** framework with `@hono/node-server` adapter — lightweight, web-standards API
+- `git` shell-out via `node:child_process` (`execFile`/`spawn`)
+- File watching via **chokidar** (battle-tested cross-platform; native `fs.watch` is unreliable on Windows)
+- Server-Sent Events for live updates (simpler than WebSocket, sufficient for one-way push)
+- **TypeScript** strict mode
 
 **Frontend:**
 - **Svelte 5** (with runes) — leaner than React, less boilerplate, fast reactivity
-- **Vite** — dev server, build
+- **Vite** — dev server with HMR, build
 - **Native SVG** for graph — no library, full control over preview overlays and animations
 - **svelte-dnd-action** for drag-and-drop
 - **CSS variables** for theming (light/dark, color overrides)
 
+**Dev tooling:**
+- **tsx** for running TypeScript without a build step in dev
+- **concurrently** to start backend + Vite frontend in one `npm run dev`
+- **vitest** for tests
+
 **Distribution:**
-- **npm package** with `bin/branchcraft.js` shebang script that spawns Bun + Vite-built static
+- **npm package** with `bin/branchcraft.js` shebang script that launches Node + serves the Vite-built static bundle
 - `npx branchcraft` zero-install entry
 - `npm install -g branchcraft` for global install
 - Phase 2: VS Code extension wrapping the same backend
+- Phase 2: optional Bun-based standalone binary via `bun build --compile`
 
 **External integrations:**
 - GitHub API via Octokit (OAuth device flow)
 - File-based AI session detection per provider (see §7.4)
+
+### 6.1 Why Node primary, not Bun
+
+Originally the plan was Bun-first. Switched to Node-first because:
+- Node is already installed on the target audience's machines (vibe-coders are typically already running Node for their JS projects)
+- `npm install -g branchcraft` works universally; Bun installs require an extra step
+- VS Code extension (Phase 2) runs on Node anyway
+- Hono is runtime-agnostic, so Bun stays trivial to add later as an alternative
+
+The cost is some performance (Bun is faster) and some convenience (Bun has built-in TS, FS watch, WS). We mitigate with `tsx`, `chokidar`, and SSE — none of which are heavy.
 
 ---
 

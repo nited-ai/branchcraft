@@ -101,9 +101,10 @@ Full design and scope: [`PLAN.md`](./PLAN.md).
 
 ## Tech stack
 
-- **Backend:** Bun + Hono (single binary, native FS watching, native WebSocket)
+- **Backend:** Node 20+ + Hono (Bun-compatible; one codebase, two runtimes)
 - **Frontend:** Svelte 5 + Vite + native SVG (no graph library — full control over preview overlays)
 - **Drag and drop:** svelte-dnd-action
+- **File watching:** chokidar
 - **Fonts:** Manrope (display) + IBM Plex Mono (code)
 - **License:** MIT
 
