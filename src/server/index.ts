@@ -1,23 +1,40 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
 import { isGitRepo, listWorktrees } from './git/worktrees.ts';
 import { gitLog } from './git/log.ts';
 import { assignLanes } from './git/layout.ts';
 import { getWorktreeStatus } from './git/status.ts';
-import type { ApiGraph, ApiHealth, ApiWorktrees } from '../shared/types.ts';
+import {
+  addRepo as cfgAddRepo,
+  findRepoById,
+  loadConfig,
+  removeRepo as cfgRemoveRepo,
+  repoIdFromPath,
+} from './config.ts';
+import type {
+  ApiAddRepoRequest,
+  ApiGraph,
+  ApiHealth,
+  ApiRepoSummary,
+  ApiRepos,
+  ApiWorktrees,
+  RepoStatusKind,
+  Worktree,
+  WorktreeStatus,
+} from '../shared/types.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.BRANCHCRAFT_PORT ?? 7777);
 
-// Resolve the repo we're serving. Priority:
-// 1. BRANCHCRAFT_INVOKED_FROM (set by bin/branchcraft.js)
-// 2. process.cwd() (when running via `npm run dev` from the repo itself)
-const repoPath = resolve(process.env.BRANCHCRAFT_INVOKED_FROM ?? process.cwd());
+// Server's startup cwd. Used for auto-bootstrap: if the user runs
+// `npx branchcraft` in a git repo and has no pinned repos yet, we pin this
+// one automatically so they get a usable view on first paint.
+const cwd = resolve(process.env.BRANCHCRAFT_INVOKED_FROM ?? process.cwd());
+const cwdId = repoIdFromPath(cwd);
 
 const pkgVersion = (() => {
   try {
@@ -30,25 +47,130 @@ const pkgVersion = (() => {
 })();
 
 const app = new Hono();
-
 app.use('/api/*', cors());
 
+// ── Health ───────────────────────────────────────────────────────────────────
+
 app.get('/api/health', async (c) => {
-  const isRepo = await isGitRepo(repoPath);
+  const isRepo = await isGitRepo(cwd);
   const body: ApiHealth = {
     ok: true,
     version: pkgVersion,
-    cwd: repoPath,
+    cwd,
     isGitRepo: isRepo,
   };
   return c.json(body);
 });
 
-app.get('/api/worktrees', async (c) => {
-  if (!(await isGitRepo(repoPath))) {
-    return c.json({ error: 'not_a_git_repo', cwd: repoPath }, 400);
+// ── Repo hub ─────────────────────────────────────────────────────────────────
+
+function aggregateStatus(worktrees: Worktree[]): {
+  status: RepoStatusKind;
+  staleCount: number;
+  dirtyCount: number;
+} {
+  let staleCount = 0;
+  let dirtyCount = 0;
+  let knownAny = false;
+  for (const wt of worktrees) {
+    if (!wt.status) continue;
+    knownAny = true;
+    if (wt.status.behind > 0) staleCount++;
+    if (wt.status.dirtyFiles > 0) dirtyCount++;
   }
-  const worktrees = await listWorktrees(repoPath);
+  if (!knownAny) return { status: 'unknown', staleCount: 0, dirtyCount: 0 };
+  if (staleCount > 0) return { status: 'stale', staleCount, dirtyCount };
+  if (dirtyCount > 0) return { status: 'dirty', staleCount, dirtyCount };
+  return { status: 'clean', staleCount, dirtyCount };
+}
+
+async function summarize(
+  id: string,
+  path: string,
+): Promise<ApiRepoSummary> {
+  const valid = await isGitRepo(path);
+  if (!valid) {
+    return {
+      id,
+      path,
+      name: basename(path) || path,
+      worktreeCount: 0,
+      status: 'unknown',
+      staleCount: 0,
+      dirtyCount: 0,
+      isCurrent: id === cwdId,
+    };
+  }
+  const worktrees = await listWorktrees(path);
+  const enriched: Worktree[] = await Promise.all(
+    worktrees.map(async (wt): Promise<Worktree> => {
+      if (wt.isPrunable) return wt;
+      const status: WorktreeStatus = await getWorktreeStatus(wt.path);
+      return { ...wt, status };
+    }),
+  );
+  const agg = aggregateStatus(enriched);
+  return {
+    id,
+    path,
+    name: basename(path) || path,
+    worktreeCount: enriched.length,
+    status: agg.status,
+    staleCount: agg.staleCount,
+    dirtyCount: agg.dirtyCount,
+    isCurrent: id === cwdId,
+  };
+}
+
+app.get('/api/repos', async (c) => {
+  const cfg = loadConfig();
+  // Auto-bootstrap: if no repos pinned and cwd is a git repo, pin it now so
+  // first paint lands on a real graph instead of an empty hub.
+  if (cfg.pinnedRepos.length === 0 && (await isGitRepo(cwd))) {
+    cfgAddRepo(cwd);
+  }
+  const fresh = loadConfig();
+  const summaries = await Promise.all(
+    fresh.pinnedRepos.map((r) => summarize(r.id, r.path)),
+  );
+  const currentId = summaries.find((s) => s.isCurrent)?.id ?? null;
+  const body: ApiRepos = { cwd, currentId, repos: summaries };
+  return c.json(body);
+});
+
+app.post('/api/repos', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as ApiAddRepoRequest | null;
+  if (!body || typeof body.path !== 'string' || !body.path.trim()) {
+    return c.json({ error: 'missing_path' }, 400);
+  }
+  const path = resolve(body.path);
+  if (!existsSync(path) || !statSync(path).isDirectory()) {
+    return c.json({ error: 'not_a_directory', path }, 400);
+  }
+  if (!(await isGitRepo(path))) {
+    return c.json({ error: 'not_a_git_repo', path }, 400);
+  }
+  const repo = cfgAddRepo(path);
+  const summary = await summarize(repo.id, repo.path);
+  return c.json(summary, 201);
+});
+
+app.delete('/api/repos/:id', (c) => {
+  const id = c.req.param('id');
+  const removed = cfgRemoveRepo(id);
+  if (!removed) return c.json({ error: 'not_found' }, 404);
+  return c.json({ ok: true });
+});
+
+// ── Per-repo data ────────────────────────────────────────────────────────────
+
+app.get('/api/repos/:id/worktrees', async (c) => {
+  const repo = findRepoById(c.req.param('id'));
+  if (!repo) return c.json({ error: 'repo_not_found' }, 404);
+  if (!(await isGitRepo(repo.path))) {
+    return c.json({ error: 'not_a_git_repo', path: repo.path }, 400);
+  }
+  const worktrees = await listWorktrees(repo.path);
   const enriched = await Promise.all(
     worktrees.map(async (wt) => {
       if (wt.isPrunable) return wt;
@@ -56,28 +178,28 @@ app.get('/api/worktrees', async (c) => {
       return { ...wt, status };
     }),
   );
-  const body: ApiWorktrees = { repoPath, worktrees: enriched };
+  const body: ApiWorktrees = { repoPath: repo.path, worktrees: enriched };
   return c.json(body);
 });
 
-app.get('/api/graph', async (c) => {
-  if (!(await isGitRepo(repoPath))) {
-    return c.json({ error: 'not_a_git_repo', cwd: repoPath }, 400);
+app.get('/api/repos/:id/graph', async (c) => {
+  const repo = findRepoById(c.req.param('id'));
+  if (!repo) return c.json({ error: 'repo_not_found' }, 404);
+  if (!(await isGitRepo(repo.path))) {
+    return c.json({ error: 'not_a_git_repo', path: repo.path }, 400);
   }
   const limitParam = c.req.query('limit');
-  const limit = limitParam ? Math.min(2000, Math.max(1, Number(limitParam))) : 200;
-  const raw = await gitLog(repoPath, { limit });
+  const limit = limitParam
+    ? Math.min(2000, Math.max(1, Number(limitParam)))
+    : 200;
+  const raw = await gitLog(repo.path, { limit });
   const { commits, laneCount } = assignLanes(raw);
-  const body: ApiGraph = { repoPath, laneCount, commits };
+  const body: ApiGraph = { repoPath: repo.path, laneCount, commits };
   return c.json(body);
 });
 
-// Serve built frontend in production. In dev (`tsx watch`) `__dirname`
-// resolves to `src/server/`, so `../web` points at `src/web/` (the source
-// tree, not a build). That's harmless to detect by directory, but serving
-// it would yield .ts files with the wrong MIME — confusing the browser.
-// Require both `index.html` and the Vite-emitted `assets/` directory so we
-// only ever serve a real build.
+// ── Static frontend (production builds only) ─────────────────────────────────
+
 const distWebDir = resolve(__dirname, '../web');
 const distIndex = resolve(distWebDir, 'index.html');
 const distAssets = resolve(distWebDir, 'assets');
@@ -92,7 +214,7 @@ if (
 }
 
 console.log(`[branchcraft] starting on http://localhost:${PORT}`);
-console.log(`[branchcraft] repo: ${repoPath}`);
+console.log(`[branchcraft] cwd: ${cwd}`);
 
 serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`[branchcraft] listening on :${info.port}`);

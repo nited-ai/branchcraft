@@ -75,3 +75,33 @@ export interface ApiGraph {
   laneCount: number;
   commits: LaidOutCommit[];
 }
+
+export type RepoStatusKind = 'clean' | 'dirty' | 'stale' | 'unknown';
+
+export interface ApiRepoSummary {
+  id: string;
+  /** Absolute path on disk. */
+  path: string;
+  /** Display name — basename of `path`. */
+  name: string;
+  worktreeCount: number;
+  status: RepoStatusKind;
+  /** Number of worktrees with `behind > 0`. */
+  staleCount: number;
+  /** Number of worktrees with at least one dirty file. */
+  dirtyCount: number;
+  /** True if this repo's path is the server's startup cwd. */
+  isCurrent: boolean;
+}
+
+export interface ApiRepos {
+  /** Absolute path of the server's startup cwd. */
+  cwd: string;
+  /** Id of the pinned repo matching cwd, or null if cwd isn't pinned. */
+  currentId: string | null;
+  repos: ApiRepoSummary[];
+}
+
+export interface ApiAddRepoRequest {
+  path: string;
+}
