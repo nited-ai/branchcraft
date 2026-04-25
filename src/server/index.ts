@@ -15,6 +15,7 @@ import {
   removeRepo as cfgRemoveRepo,
   repoIdFromPath,
 } from './config.ts';
+import { scanAllSessions } from './sessions/index.ts';
 import type {
   ApiAddRepoRequest,
   ApiGraph,
@@ -84,6 +85,27 @@ function aggregateStatus(worktrees: Worktree[]): {
   return { status: 'clean', staleCount, dirtyCount };
 }
 
+async function enrichWorktrees(repoPath: string): Promise<Worktree[]> {
+  const worktrees = await listWorktrees(repoPath);
+  const sessions = await scanAllSessions(worktrees.map((w) => w.path));
+  const sessionsByCwd = new Map<string, typeof sessions>();
+  for (const s of sessions) {
+    const arr = sessionsByCwd.get(s.cwd) ?? [];
+    arr.push(s);
+    sessionsByCwd.set(s.cwd, arr);
+  }
+  return Promise.all(
+    worktrees.map(async (wt): Promise<Worktree> => {
+      const sess = (sessionsByCwd.get(wt.path) ?? []).slice().sort(
+        (a, b) => b.lastActivity - a.lastActivity,
+      );
+      if (wt.isPrunable) return { ...wt, sessions: sess };
+      const status: WorktreeStatus = await getWorktreeStatus(wt.path);
+      return { ...wt, status, sessions: sess };
+    }),
+  );
+}
+
 async function summarize(
   id: string,
   path: string,
@@ -101,14 +123,7 @@ async function summarize(
       isCurrent: id === cwdId,
     };
   }
-  const worktrees = await listWorktrees(path);
-  const enriched: Worktree[] = await Promise.all(
-    worktrees.map(async (wt): Promise<Worktree> => {
-      if (wt.isPrunable) return wt;
-      const status: WorktreeStatus = await getWorktreeStatus(wt.path);
-      return { ...wt, status };
-    }),
-  );
+  const enriched = await enrichWorktrees(path);
   const agg = aggregateStatus(enriched);
   return {
     id,
@@ -170,14 +185,7 @@ app.get('/api/repos/:id/worktrees', async (c) => {
   if (!(await isGitRepo(repo.path))) {
     return c.json({ error: 'not_a_git_repo', path: repo.path }, 400);
   }
-  const worktrees = await listWorktrees(repo.path);
-  const enriched = await Promise.all(
-    worktrees.map(async (wt) => {
-      if (wt.isPrunable) return wt;
-      const status = await getWorktreeStatus(wt.path);
-      return { ...wt, status };
-    }),
-  );
+  const enriched = await enrichWorktrees(repo.path);
   const body: ApiWorktrees = { repoPath: repo.path, worktrees: enriched };
   return c.json(body);
 });

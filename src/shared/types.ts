@@ -12,6 +12,28 @@ export interface WorktreeStatus {
   behind: number;
 }
 
+export type SessionProviderId =
+  | 'claude-code' // CCD GUI + `claude` CLI (shared storage)
+  | 'aider'
+  | 'codex-cli'
+  | 'codex-desktop'
+  | 'gemini-cli';
+
+export interface Session {
+  id: string;
+  provider: SessionProviderId;
+  /** Absolute cwd the session was started in — matched against worktree paths. */
+  cwd: string;
+  /** Display title — custom title if set, otherwise truncated first user message. */
+  title: string;
+  /** Unix seconds. Best-effort: file btime where available, else mtime. */
+  startedAt: number;
+  /** Unix seconds — last write to the session's storage. */
+  lastActivity: number;
+  /** True when last activity is within ~2 min. */
+  isLive: boolean;
+}
+
 export interface Worktree {
   /** Absolute path on disk. */
   path: string;
@@ -27,6 +49,8 @@ export interface Worktree {
   isPrunable: boolean;
   /** Working-tree status — omitted when the worktree is unreadable (e.g. prunable). */
   status?: WorktreeStatus;
+  /** AI sessions discovered for this worktree's path. Empty when none found. */
+  sessions: Session[];
 }
 
 export interface ApiHealth {

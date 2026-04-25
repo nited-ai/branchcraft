@@ -19,6 +19,7 @@ describe('parseWorktreesPorcelain', () => {
         isMain: true,
         isLocked: false,
         isPrunable: false,
+        sessions: [],
       },
     ]);
   });

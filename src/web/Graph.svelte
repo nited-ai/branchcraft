@@ -1,6 +1,7 @@
 <script lang="ts">
-  import type { LaidOutCommit, Worktree } from '../shared/types.ts';
+  import type { LaidOutCommit, Session, Worktree } from '../shared/types.ts';
   import WorktreeCard from './WorktreeCard.svelte';
+  import SessionPill from './SessionPill.svelte';
 
   type Props = {
     commits: LaidOutCommit[];
@@ -16,7 +17,8 @@
   const COMMIT_R = 4;
   const HEAD_R = 6;
   const CARD_H = 30;
-  const HINT_H = 16;
+  const HINT_H = 18;
+  const PILL_H = 24;
   const CARD_GAP = 4;
 
   const laneX = (lane: number): number => PAD + lane * LANE_W + LANE_W / 2;
@@ -39,12 +41,23 @@
     height: number;
   };
 
+  function worktreeBlockHeight(wt: Worktree): number {
+    const sessionH = wt.sessions.length === 0
+      ? HINT_H
+      : wt.sessions.length * PILL_H;
+    return CARD_H + sessionH;
+  }
+
   let rows = $derived.by<Row[]>(() => {
     const result: Row[] = [];
     let top = PAD;
     for (const c of commits) {
       const wts = worktreesByCommit.get(c.sha) ?? [];
-      const extras = wts.length === 0 ? 0 : wts.length * (CARD_H + HINT_H) + CARD_GAP;
+      let extras = 0;
+      if (wts.length > 0) {
+        extras = CARD_GAP;
+        for (const wt of wts) extras += worktreeBlockHeight(wt);
+      }
       const height = ROW_H + extras;
       result.push({
         commit: c,
@@ -105,6 +118,7 @@
     return out;
   });
 
+  type SessionLayout = { key: string; top: number; session: Session };
   type CardLayout = {
     key: string;
     worktree: Worktree;
@@ -112,15 +126,23 @@
     dotX: number;
     connectorTop: number;
     connectorHeight: number;
-    sessionHintTop: number;
+    sessions: SessionLayout[];
+    /** Top of the "no sessions" stub when worktree.sessions is empty. */
+    hintTop: number | null;
   };
   let cardLayouts = $derived.by<CardLayout[]>(() => {
     const out: CardLayout[] = [];
     for (const r of rows) {
       const dotX = laneX(r.commit.lane);
-      for (let i = 0; i < r.worktrees.length; i++) {
-        const wt = r.worktrees[i]!;
-        const cardTop = r.top + ROW_H + CARD_GAP + i * (CARD_H + HINT_H);
+      let cursor = r.top + ROW_H + CARD_GAP;
+      for (const wt of r.worktrees) {
+        const cardTop = cursor;
+        const sessionsTop = cardTop + CARD_H;
+        const sessions: SessionLayout[] = wt.sessions.map((s, i) => ({
+          key: `${wt.path}|${s.id}`,
+          top: sessionsTop + i * PILL_H,
+          session: s,
+        }));
         out.push({
           key: `${r.commit.sha}|${wt.path}`,
           worktree: wt,
@@ -128,8 +150,10 @@
           dotX,
           connectorTop: r.dotY,
           connectorHeight: cardTop + CARD_H / 2 - r.dotY,
-          sessionHintTop: cardTop + CARD_H,
+          sessions,
+          hintTop: wt.sessions.length === 0 ? sessionsTop : null,
         });
+        cursor += worktreeBlockHeight(wt);
       }
     }
     return out;
@@ -223,10 +247,17 @@
     <div class="card-row" style="top: {card.top}px;">
       <WorktreeCard worktree={card.worktree} />
     </div>
-    <div class="session-hint" style="top: {card.sessionHintTop}px;">
-      <span class="hint-glyph mono" aria-hidden="true">·</span>
-      <span class="dim">no sessions</span>
-    </div>
+    {#if card.hintTop !== null}
+      <div class="session-hint" style="top: {card.hintTop}px;">
+        <span class="hint-glyph mono" aria-hidden="true">·</span>
+        <span class="dim">no sessions</span>
+      </div>
+    {/if}
+    {#each card.sessions as s (s.key)}
+      <div class="session-row" style="top: {s.top}px;">
+        <SessionPill session={s.session} />
+      </div>
+    {/each}
   {/each}
 </div>
 
@@ -334,8 +365,18 @@
     display: flex;
     align-items: center;
     gap: var(--s2);
-    height: 16px;
+    height: 18px;
     font-size: 11px;
+  }
+
+  .session-row {
+    position: absolute;
+    left: calc(var(--svg-w) + var(--s4) + var(--s5));
+    right: 0;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    padding-right: var(--s4);
   }
 
   .hint-glyph {

@@ -60,6 +60,7 @@ export function parseWorktreesPorcelain(output: string): Worktree[] {
         isMain: worktrees.length === 0,
         isLocked,
         isPrunable,
+        sessions: [],
       });
     }
   }
