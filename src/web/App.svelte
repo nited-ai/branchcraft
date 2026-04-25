@@ -15,6 +15,7 @@
   import CommandForm from './CommandForm.svelte';
   import QueuePanel from './QueuePanel.svelte';
   import Rucksacks from './Rucksacks.svelte';
+  import Coachmark from './Coachmark.svelte';
   import type {
     ApiRucksacks,
     ApplyResult,
@@ -219,6 +220,20 @@
     switchRepo(summary.id);
   }
 
+  async function removeRepo(id: string) {
+    try {
+      await fetch(`/api/repos/${id}`, { method: 'DELETE' });
+    } catch {
+      // ignore — UI still updates optimistically
+    }
+    repos = repos.filter((r) => r.id !== id);
+    if (activeRepoId === id) {
+      activeRepoId = repos[0]?.id ?? null;
+      setUrlRepoId(activeRepoId);
+      await loadActiveRepo();
+    }
+  }
+
   onMount(async () => {
     const saved = localStorage.getItem('branchcraft.theme');
     if (saved === 'dark' || saved === 'light') {
@@ -269,6 +284,7 @@
     activeId={activeRepoId}
     onSwitch={switchRepo}
     onAdd={() => (modalOpen = true)}
+    onRemove={removeRepo}
   />
 
   <main>
@@ -365,6 +381,8 @@
   onClose={() => (cmdFormOpen = false)}
   onAdd={queueCommand}
 />
+
+<Coachmark storageKey="branchcraft.coachmark.dismissed" />
 
 <style>
   .layout {

@@ -14,10 +14,10 @@ If you're tempted to add a feature or change scope, check `PLAN.md §10 (Out of 
 
 ## Status
 
-- **Phase:** Evening 1 partially landed. Scaffold + first real logic (worktree parser) verified end-to-end.
+- **Phase:** Evenings 1–6 + 8 landed. Evening 7 (GitHub OAuth) deliberately deferred — needs an OAuth-app/client-secret the codebase can't produce on its own.
 - **Active branch:** `main`. Pre-MVP, no protected branch yet — direct commits to `main` are fine.
-- **Sessions:** none of the AI session providers wired up yet. Evening 3 work.
-- **Graph rendering:** not started. Evening 1's biggest remaining chunk.
+- **Tests:** 74 vitest cases across 9 files, all green. `tsc --noEmit && svelte-check` is clean.
+- **Live:** open repo gets a vertical-flow graph with worktree cards, session pills (Claude Code + Aider), stale outline, theme toggle, multi-repo sidebar, sticky queue panel with simulator preview, drag-to-cherry-pick, drag-to-merge, three rucksacks (stash/tags/reflog).
 
 ## Run it
 
@@ -27,40 +27,74 @@ npm test         # vitest, currently 5 tests in src/server/git/worktrees.test.ts
 npm run dev      # spawns Hono on :7777 + Vite on :5173 via scripts/dev.js
 ```
 
-Visit http://localhost:5173 — Svelte SPA proxies `/api/*` to Hono. The current UI is an Evening-1 sketch: a worktree table, no graph yet.
+Visit http://localhost:5173 — Svelte SPA proxies `/api/*` to Hono. `localhost:7777/` returns 404 in dev (only serves the build output when one exists; see static-fallback note in `src/server/index.ts`).
 
-`npm run dev` uses `scripts/dev.js` (not `concurrently`, which had Windows stdio-buffering issues). If you change parallelization, verify that tsx watch's output still flushes.
+`npm run dev` uses `scripts/dev.js` (not `concurrently`, which had Windows stdio-buffering issues). The script ignores stdin so children survive non-TTY parents like preview servers — don't change that without re-verifying. If you change parallelization, verify that tsx watch's output still flushes.
 
 ## File map
 
 ```
-bin/branchcraft.js        CLI entry; expects dist/ from `npm run build`
-src/shared/types.ts       Types shared between Hono server + Svelte web
-src/server/index.ts       Hono app, /api/health and /api/worktrees
-src/server/git/           Git wrappers — git binary shell-out via execFile
-  worktrees.ts            `git worktree list --porcelain` parser (real)
-  worktrees.test.ts       5 vitest cases: main/multi/locked/CRLF/empty
-src/web/index.html        Vite entry, loads Manrope + IBM Plex Mono
-src/web/main.ts           Svelte 5 mount
-src/web/app.css           Refined-GitKraken design tokens (PLAN.md §3)
-src/web/App.svelte        Evening-1 sketch UI, worktree table
-scripts/dev.js            Parallel dev runner replacing concurrently
-vite.config.ts            root: src/web, /api proxy to :7777
-vitest.config.ts          root: __dirname, tests under src/**/*
-tsconfig.json             Strict, exactOptionalPropertyTypes, path aliases
-tsconfig.server.json      Server-only build config for `npm run build:server`
+bin/branchcraft.js          CLI entry; expects dist/ from `npm run build`
+src/shared/types.ts         Types shared between Hono server + Svelte web
+src/server/index.ts         Hono app, all REST endpoints
+src/server/config.ts        ~/.branchcraft/config.json store (pinned repos)
+src/server/git/
+  worktrees.ts              `git worktree list --porcelain` parser
+  log.ts                    `git log --topo-order --format=...` parser
+  layout.ts                 First-parent lane assignment for the graph
+  status.ts                 `git status --porcelain=v2 --branch` parser
+  rucksacks.ts              stash / tags / reflog list parsers
+  simulate.ts               Pure simulator (merge / rebase / cherry-pick /
+                            reset / push) with synth `sim-*` SHAs
+  apply.ts                  Real `git` execution for /api/apply
+src/server/sessions/
+  types.ts                  SessionProvider plugin interface
+  index.ts                  Registry + scanAllSessions
+  claude-code.ts            CCD + claude CLI (~/.claude/projects/*.jsonl)
+  aider.ts                  <repo>/.aider.chat.history.md
+src/web/
+  index.html / main.ts      Vite entry + Svelte 5 mount
+  app.css                   Refined-GitKraken design tokens (PLAN.md §3)
+  App.svelte                Top-level layout + state
+  Graph.svelte              SVG graph + worktree cards + session pills + drag
+  WorktreeCard.svelte       Inline card under a HEAD commit
+  SessionPill.svelte        Live/idle pill with provider badge
+  RepoSidebar.svelte        Left rail — pinned repos + status
+  Rucksacks.svelte          Right rail — stash/tags/reflog
+  AddRepoModal.svelte       + Add repo dialog
+  CommandForm.svelte        Queue a command via form
+  QueuePanel.svelte         Sticky-bottom queue + apply
+  Coachmark.svelte          First-launch onboarding tip
+  queue.ts                  commandSummary + COMMAND_BLURB
+scripts/dev.js              Parallel dev runner replacing concurrently
+vite.config.ts              root: src/web, /api proxy to :7777
+vitest.config.ts            root: __dirname, tests under src/**/*
+tsconfig.json               Strict, exactOptionalPropertyTypes, allowImportingTsExtensions
+tsconfig.server.json        Server-only build config for `npm run build:server`
 ```
 
 ## Build plan (where to pick up)
 
-PLAN.md §9 lists 9 evenings. As of last commit:
-- ✅ Evening 1 partial: scaffold + worktree discovery + status table
-- ⬜ Evening 1 remaining: SVG graph, worktree cards + session pills inline (per Discussion #1 §4.1.1/4.1.2), stale-detection visual, light/dark toggle button
-- ⬜ Evening 2: multi-repo hub (left sidebar with pinned repos)
-- ⬜ Evening 3: SessionProvider plugin architecture + 5 providers (CCD, Claude CLI, Codex CLI, Codex Desktop, Gemini CLI, Aider)
-- ⬜ Evenings 4-9: simulator, drag, rucksacks, OAuth, teams, polish
+PLAN.md §9 lists 9 evenings. State after the autonomous push-through:
 
-When picking up, check the latest commit and recent Discussion comments first — both can change priorities.
+- ✅ **E1** Status mode: graph + worktree cards + session pills + stale outline + theme toggle
+- ✅ **E2** Multi-repo hub: pinned repos in `~/.branchcraft/config.json`, sidebar, URL routing
+- ✅ **E3** Plugin architecture for sessions: claude-code + aider providers shipped; codex-cli, codex-desktop, gemini-cli have `SessionProviderId` slots but no implementation yet (PLAN.md §11 still lists their storage paths as open)
+- ✅ **E4** Simulator core + queue + apply (5 commands)
+- ✅ **E5** Drag layer — cherry-pick (commit → ref) and merge (ref → ref) gestures with hover preview. Disambig popup (§4.4) and rucksack drag-in / drag-out (§4.2 rows 10-15) NOT done yet
+- ✅ **E6** Three rucksacks: data + sidebar; create-tag / pop-stash / restore-from-reflog flows still open
+- ⏸ **E7** GitHub OAuth + PR overlay — **deliberately skipped** by the autonomous run. Requires a GitHub OAuth app and a client secret that can't be generated from inside the codebase. Pick up by registering one, then implementing the device-flow per §8 endpoints.
+- ✅ **E8** Onboarding tooltips: COMMAND_BLURB hover hints on the queue, first-launch coachmark
+- 🟡 **E9** Polish: repo unpin landed; reorder-compare panel (§4.7) and pair-swap hints not yet
+
+Remaining stretch goals to check off before MVP-closed:
+1. Codex / Gemini providers (paths verification in PLAN §11)
+2. Disambig popup on ref-to-ref drag (currently always merges)
+3. Apply-modal for tag / stash / squash-merge (need free-text input)
+4. Reorder-compare diff panel
+5. GitHub OAuth + PR markers (E7 in full)
+
+When picking up, run `npm test && npm run typecheck` first — both should be clean. Then `npm run dev` and verify the live preview matches what the README claims.
 
 ## Conventions
 
@@ -83,10 +117,14 @@ PLAN.md §3 has the full token list. Key points:
 ## Known gotchas
 
 - **Windows + concurrently:** swallows tsx watch's stdout. Fixed via `scripts/dev.js`. Don't reintroduce `concurrently` for the dev script.
-- **CRLF:** repo enforces nothing; tests handle CRLF in worktree-porcelain output.
+- **CRLF:** repo enforces nothing; tests handle CRLF in worktree-porcelain output. Git auto-converts on Windows checkout (warnings during `git add` are harmless).
 - **Bun:** Hono is Bun-compatible but the primary runtime is Node 20+. Bun-specific APIs (`Bun.spawn`, `Bun.watch`) must NOT be used in core code; if needed, gate behind a runtime check.
 - **`bin/branchcraft.js`:** intentionally errors out without `dist/`. Use `npm run dev` from a checkout, or `npm run build && npm start`.
 - **Cross-project preview:** Claude Preview's launch.json enforces cwd inside the active project root. If running CCD in this repo, that's fine; if running CCD elsewhere with a launch.json pointing here, it'll be blocked.
+- **Static-serve in dev:** Hono only mounts the static fallback when both `dist/web/index.html` AND `dist/web/assets/` exist. Don't relax this — the older permissive check made dev mode serve raw `.ts` files at `:7777` and the browser rejected them with a MIME error.
+- **Apply is real:** `/api/apply` runs `git` for real on the chosen worktree and stops on the first failure. The simulator preview uses `sim-*` SHAs that never touch disk. Test apply against throwaway repos until you trust your code paths — the autonomous push-through never exercised apply against this repo.
+- **Branch names with slashes:** `feature/x` is a local branch (kind: 'branch'), `origin/main` is a remote. The simulator preserves the kind explicitly via `Map<RefName, { sha; kind }>`; do NOT switch back to a path-based heuristic.
+- **Claude Code project key encoding:** `[:\\/.] -> -`. The encoder is intentionally pure (no `resolve()`) so it stays platform-deterministic — callers pre-resolve.
 
 ## Project hygiene
 

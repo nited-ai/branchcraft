@@ -6,9 +6,10 @@
     activeId: string | null;
     onSwitch: (id: string) => void;
     onAdd: () => void;
+    onRemove: (id: string) => void;
   };
 
-  let { repos, activeId, onSwitch, onAdd }: Props = $props();
+  let { repos, activeId, onSwitch, onAdd, onRemove }: Props = $props();
 
   function statusLabel(r: ApiRepoSummary): string {
     if (r.status === 'stale') return `${r.staleCount} stale`;
@@ -29,7 +30,7 @@
   {:else}
     <ol class="repo-list">
       {#each repos as r (r.id)}
-        <li>
+        <li class="repo-row">
           <button
             class="repo"
             class:active={r.id === activeId}
@@ -48,6 +49,16 @@
               </span>
             </span>
           </button>
+          <button
+            class="unpin"
+            onclick={() => {
+              if (confirm(`Unpin "${r.name}" from the hub? The repo on disk is untouched.`)) {
+                onRemove(r.id);
+              }
+            }}
+            aria-label={`Unpin ${r.name}`}
+            title="Unpin from hub"
+          >×</button>
         </li>
       {/each}
     </ol>
@@ -106,6 +117,35 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .repo-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    position: relative;
+  }
+
+  .unpin {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 100ms ease, color 100ms ease, background 100ms ease;
+  }
+
+  .repo-row:hover .unpin {
+    opacity: 1;
+  }
+
+  .unpin:hover {
+    color: var(--danger);
+    background: rgba(204, 102, 119, 0.1);
   }
 
   .repo {
