@@ -704,14 +704,17 @@ Explicitly **not** in MVP:
 
 ## 11. Open Questions
 
-Mostly resolved through brainstorming 2026-04-25. Remaining:
+### Still open
 
-1. **Codex CLI / Codex Desktop / Gemini CLI session storage paths** — verify during Evening 3, document findings.
-2. **Branch color persistence** — should user overrides survive across sessions? *Proposal: yes, in `~/.branchcraft/config.json` keyed by `{repoId, branchName}`.*
-3. **Encrypted-at-rest GitHub token** — use OS keychain (macOS Keychain, Windows Credential Vault, Linux libsecret) or a passphrase? *Proposal: OS keychain via `keytar` or equivalent for Bun, fallback to plain file with chmod 600 + warning.*
-4. **First-time setup / onboarding tour** — full guided tour, or just coachmarks on first action? *Proposal: coachmarks only. Full tour is high-effort low-value.*
-5. **License of bundled fonts** — Manrope and IBM Plex Mono are both OFL/SIL — bundle or load from CDN? *Proposal: bundle (offline-first), faster paint.*
-6. **Repo size limits** — what happens with a 100k-commit monorepo? *Proposal: virtualized graph past 500 commits, "show more" pagination, document upper limits.*
+1. **Codex CLI / Codex Desktop / Gemini CLI session storage paths** — verify during Evening 3, document findings in this section.
+
+### Decisions (resolved 2026-04-25)
+
+- **Branch color persistence:** ✅ persisted in `~/.branchcraft/config.json` keyed by `{repoId, branchName}`. User overrides survive across sessions.
+- **GitHub token storage:** ✅ OS keychain (macOS Keychain, Windows Credential Vault, Linux libsecret) via `keytar` or Bun-equivalent. Plain-file fallback with `chmod 600` and an on-screen security warning if keychain is unavailable.
+- **Onboarding:** ✅ coachmarks on first action only. No full guided tour. Hover-tooltips per command serve the learner audience continuously.
+- **Fonts:** ✅ bundle Manrope + IBM Plex Mono in the npm package (both OFL/SIL-licensed). Offline-first, faster initial paint.
+- **Repo size limits:** ✅ virtualized graph past 500 commits with "show more" pagination. Soft upper limit ~50k commits visible without paging; documented in README.
 
 ---
 
