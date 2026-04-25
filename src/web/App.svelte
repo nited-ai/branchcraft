@@ -68,10 +68,6 @@
   function toggleTheme() {
     theme = theme === 'dark' ? 'light' : 'dark';
   }
-
-  function shortSha(sha: string): string {
-    return sha.slice(0, 7);
-  }
 </script>
 
 <main>
@@ -120,41 +116,7 @@
         <span class="mono">{laneCount}</span> lanes
       </p>
 
-      <Graph commits={graphCommits} {laneCount} />
-
-      <h3>Worktrees ({worktrees.length})</h3>
-      <table class="worktrees">
-        <thead>
-          <tr>
-            <th>Path</th>
-            <th>Branch</th>
-            <th>HEAD</th>
-            <th>Flags</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each worktrees as wt (wt.path)}
-            <tr>
-              <td class="mono">
-                {wt.path}
-                {#if wt.isMain}<span class="tag main">main</span>{/if}
-              </td>
-              <td class="mono">
-                {#if wt.branch}
-                  {wt.branch}
-                {:else}
-                  <span class="dim">(detached)</span>
-                {/if}
-              </td>
-              <td class="mono dim">{shortSha(wt.head)}</td>
-              <td>
-                {#if wt.isLocked}<span class="tag warn">locked</span>{/if}
-                {#if wt.isPrunable}<span class="tag danger">prunable</span>{/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+      <Graph commits={graphCommits} {laneCount} {worktrees} />
     {/if}
   </section>
 
@@ -240,72 +202,11 @@
     padding-bottom: var(--s2);
   }
 
-  section h3 {
-    margin: var(--s5) 0 var(--s3) 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--branch-2);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
   .dim {
     color: var(--text-secondary);
   }
 
   .error {
-    color: var(--danger);
-  }
-
-  table.worktrees {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
-
-  table.worktrees th {
-    text-align: left;
-    font-weight: 500;
-    color: var(--text-secondary);
-    border-bottom: 1px solid var(--hairline);
-    padding: var(--s2) var(--s3);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-size: 11px;
-  }
-
-  table.worktrees td {
-    padding: var(--s2) var(--s3);
-    border-bottom: 1px solid var(--hairline);
-    vertical-align: top;
-  }
-
-  table.worktrees tr:last-child td {
-    border-bottom: none;
-  }
-
-  .tag {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 500;
-    margin-left: var(--s2);
-  }
-
-  .tag.main {
-    background: rgba(164, 185, 230, 0.15);
-    color: var(--branch-0);
-  }
-
-  .tag.warn {
-    background: rgba(212, 165, 74, 0.15);
-    color: var(--warning);
-  }
-
-  .tag.danger {
-    background: rgba(204, 102, 119, 0.15);
     color: var(--danger);
   }
 

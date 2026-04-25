@@ -8,6 +8,7 @@ import { dirname } from 'node:path';
 import { isGitRepo, listWorktrees } from './git/worktrees.ts';
 import { gitLog } from './git/log.ts';
 import { assignLanes } from './git/layout.ts';
+import { getWorktreeStatus } from './git/status.ts';
 import type { ApiGraph, ApiHealth, ApiWorktrees } from '../shared/types.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,7 +49,14 @@ app.get('/api/worktrees', async (c) => {
     return c.json({ error: 'not_a_git_repo', cwd: repoPath }, 400);
   }
   const worktrees = await listWorktrees(repoPath);
-  const body: ApiWorktrees = { repoPath, worktrees };
+  const enriched = await Promise.all(
+    worktrees.map(async (wt) => {
+      if (wt.isPrunable) return wt;
+      const status = await getWorktreeStatus(wt.path);
+      return { ...wt, status };
+    }),
+  );
+  const body: ApiWorktrees = { repoPath, worktrees: enriched };
   return c.json(body);
 });
 

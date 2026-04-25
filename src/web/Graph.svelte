@@ -1,37 +1,73 @@
 <script lang="ts">
-  import type { LaidOutCommit } from '../shared/types.ts';
+  import type { LaidOutCommit, Worktree } from '../shared/types.ts';
+  import WorktreeCard from './WorktreeCard.svelte';
 
   type Props = {
     commits: LaidOutCommit[];
     laneCount: number;
+    worktrees: Worktree[];
   };
 
-  let { commits, laneCount }: Props = $props();
+  let { commits, laneCount, worktrees }: Props = $props();
 
   const ROW_H = 36;
   const LANE_W = 22;
   const PAD = 20;
   const COMMIT_R = 4;
   const HEAD_R = 6;
+  const CARD_H = 30;
+  const HINT_H = 22;
+  const CARD_GAP = 6;
 
   const laneX = (lane: number): number => PAD + lane * LANE_W + LANE_W / 2;
-  const rowY = (row: number): number => PAD + row * ROW_H + ROW_H / 2;
 
-  let bySha = $derived(new Map(commits.map((c) => [c.sha, c] as const)));
+  let worktreesByCommit = $derived.by(() => {
+    const map = new Map<string, Worktree[]>();
+    for (const wt of worktrees) {
+      const arr = map.get(wt.head) ?? [];
+      arr.push(wt);
+      map.set(wt.head, arr);
+    }
+    return map;
+  });
+
+  type Row = {
+    commit: LaidOutCommit;
+    worktrees: Worktree[];
+    top: number;
+    dotY: number;
+    height: number;
+  };
+
+  let rows = $derived.by<Row[]>(() => {
+    const result: Row[] = [];
+    let top = PAD;
+    for (const c of commits) {
+      const wts = worktreesByCommit.get(c.sha) ?? [];
+      const extras = wts.length === 0 ? 0 : wts.length * (CARD_H + HINT_H) + CARD_GAP;
+      const height = ROW_H + extras;
+      result.push({
+        commit: c,
+        worktrees: wts,
+        top,
+        dotY: top + ROW_H / 2,
+        height,
+      });
+      top += height;
+    }
+    return result;
+  });
+
+  let bySha = $derived(new Map(rows.map((r) => [r.commit.sha, r] as const)));
 
   let svgWidth = $derived(PAD + Math.max(1, laneCount) * LANE_W + PAD / 2);
-  let svgHeight = $derived(PAD * 2 + commits.length * ROW_H);
+  let totalHeight = $derived.by(() => {
+    if (rows.length === 0) return 200;
+    const last = rows[rows.length - 1]!;
+    return last.top + last.height + PAD;
+  });
 
-  function pathTo(
-    childLane: number,
-    childRow: number,
-    parentLane: number,
-    parentRow: number,
-  ): string {
-    const x1 = laneX(childLane);
-    const y1 = rowY(childRow);
-    const x2 = laneX(parentLane);
-    const y2 = rowY(parentRow);
+  function pathBetween(x1: number, y1: number, x2: number, y2: number): string {
     if (x1 === x2) return `M ${x1} ${y1} L ${x2} ${y2}`;
     const my = (y1 + y2) / 2;
     return `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`;
@@ -42,47 +78,70 @@
   const isMerge = (c: LaidOutCommit): boolean => c.parents.length > 1;
   const shortSha = (s: string): string => s.slice(0, 7);
 
-  type Edge = {
-    key: string;
-    d: string;
-    color: string;
-    dashed: boolean;
-  };
-
+  type Edge = { key: string; d: string; color: string };
   let edges = $derived.by<Edge[]>(() => {
     const out: Edge[] = [];
-    for (const c of commits) {
+    for (const r of rows) {
+      const c = r.commit;
       for (let i = 0; i < c.parents.length; i++) {
         const parentSha = c.parents[i]!;
+        const parentRow = bySha.get(parentSha);
         const parentLane = c.parentLanes[i];
-        const parent = bySha.get(parentSha);
-        if (parent === undefined || parentLane === undefined) continue;
-        // First-parent edge keeps the child's lane color; merge edges use the
-        // child lane's color too so that side-branch lines are colored by the
-        // branch they're feeding. Out of viewport parents are skipped.
+        if (!parentRow || parentLane === undefined) continue;
+        const childLane = i === 0 ? c.lane : parentLane;
         const colorLane = i === 0 ? c.lane : parentLane;
         out.push({
           key: `${c.sha}->${parentSha}#${i}`,
-          d: pathTo(i === 0 ? c.lane : parentLane, c.row, parentLane, parent.row),
+          d: pathBetween(
+            laneX(childLane),
+            r.dotY,
+            laneX(parentLane),
+            parentRow.dotY,
+          ),
           color: laneColor(colorLane),
-          dashed: false,
         });
       }
     }
     return out;
   });
 
-  function refClass(kind: string): string {
-    return `ref ref-${kind}`;
-  }
+  type CardLayout = {
+    key: string;
+    worktree: Worktree;
+    top: number;
+    dotX: number;
+    connectorTop: number;
+    connectorHeight: number;
+    sessionHintTop: number;
+  };
+  let cardLayouts = $derived.by<CardLayout[]>(() => {
+    const out: CardLayout[] = [];
+    for (const r of rows) {
+      const dotX = laneX(r.commit.lane);
+      for (let i = 0; i < r.worktrees.length; i++) {
+        const wt = r.worktrees[i]!;
+        const cardTop = r.top + ROW_H + CARD_GAP + i * (CARD_H + HINT_H);
+        out.push({
+          key: `${r.commit.sha}|${wt.path}`,
+          worktree: wt,
+          top: cardTop,
+          dotX,
+          connectorTop: r.dotY,
+          connectorHeight: cardTop + CARD_H / 2 - r.dotY,
+          sessionHintTop: cardTop + CARD_H,
+        });
+      }
+    }
+    return out;
+  });
 </script>
 
-<div class="graph" style="--row-h: {ROW_H}px; --pad: {PAD}px; --svg-w: {svgWidth}px;">
+<div class="graph" style="--svg-w: {svgWidth}px; height: {totalHeight}px;">
   <svg
     class="graph-svg"
     width={svgWidth}
-    height={svgHeight}
-    viewBox="0 0 {svgWidth} {svgHeight}"
+    height={totalHeight}
+    viewBox="0 0 {svgWidth} {totalHeight}"
     role="img"
     aria-label="Commit graph"
   >
@@ -104,7 +163,7 @@
         />
       </pattern>
     </defs>
-    <rect width={svgWidth} height={svgHeight} fill="url(#blueprint-grid)" />
+    <rect width={svgWidth} height={totalHeight} fill="url(#blueprint-grid)" />
 
     {#each edges as edge (edge.key)}
       <path
@@ -113,55 +172,75 @@
         stroke={edge.color}
         stroke-width="1.5"
         stroke-linecap="round"
-        stroke-dasharray={edge.dashed ? '4 3' : undefined}
       />
     {/each}
 
-    {#each commits as c (c.sha)}
-      {#if isHead(c)}
+    {#each rows as r (r.commit.sha)}
+      {#if isHead(r.commit)}
         <circle
-          cx={laneX(c.lane)}
-          cy={rowY(c.row)}
+          cx={laneX(r.commit.lane)}
+          cy={r.dotY}
           r={HEAD_R + 4}
-          fill={laneColor(c.lane)}
+          fill={laneColor(r.commit.lane)}
           fill-opacity="0.18"
         />
       {/if}
       <circle
-        cx={laneX(c.lane)}
-        cy={rowY(c.row)}
-        r={isHead(c) ? HEAD_R : COMMIT_R}
-        fill={isMerge(c) ? 'var(--bg)' : laneColor(c.lane)}
-        stroke={laneColor(c.lane)}
-        stroke-width={isMerge(c) ? 1.5 : 0}
+        cx={laneX(r.commit.lane)}
+        cy={r.dotY}
+        r={isHead(r.commit) ? HEAD_R : COMMIT_R}
+        fill={isMerge(r.commit) ? 'var(--bg)' : laneColor(r.commit.lane)}
+        stroke={laneColor(r.commit.lane)}
+        stroke-width={isMerge(r.commit) ? 1.5 : 0}
       />
     {/each}
   </svg>
 
   <ol class="labels">
-    {#each commits as c (c.sha)}
-      <li style="top: {rowY(c.row) - ROW_H / 2}px;">
-        <span class="sha mono">{shortSha(c.sha)}</span>
-        {#each c.refs as ref (ref.kind + (ref.name ?? ''))}
+    {#each rows as r (r.commit.sha)}
+      <li style="top: {r.top}px; height: {ROW_H}px;">
+        <span class="sha mono">{shortSha(r.commit.sha)}</span>
+        {#each r.commit.refs as ref (ref.kind + (ref.name ?? ''))}
           {#if ref.name}
-            <span class={refClass(ref.kind)}>{ref.name}</span>
+            <span class={`ref ref-${ref.kind}`}>{ref.name}</span>
           {/if}
         {/each}
-        <span class="subject">{c.subject}</span>
+        <span class="subject">{r.commit.subject}</span>
       </li>
     {/each}
   </ol>
+
+  {#each cardLayouts as card (card.key)}
+    <span
+      class="connector"
+      style="
+        left: {card.dotX}px;
+        top: {card.connectorTop}px;
+        height: {card.connectorHeight}px;
+      "
+      aria-hidden="true"
+    ></span>
+    <div class="card-row" style="top: {card.top}px;">
+      <WorktreeCard worktree={card.worktree} />
+    </div>
+    <div class="session-hint" style="top: {card.sessionHintTop}px;">
+      <span class="hint-glyph mono" aria-hidden="true">└─</span>
+      <span class="dim">no active sessions</span>
+    </div>
+  {/each}
 </div>
 
 <style>
   .graph {
     position: relative;
-    /* Reserve enough height for the SVG, then absolute label list overlaps. */
-    min-height: 200px;
   }
 
   .graph-svg {
     display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
   }
 
   .labels {
@@ -176,7 +255,8 @@
 
   .labels li {
     position: absolute;
-    height: var(--row-h);
+    left: 0;
+    right: 0;
     display: flex;
     align-items: center;
     gap: var(--s2);
@@ -225,5 +305,39 @@
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .connector {
+    position: absolute;
+    width: 1px;
+    border-left: 1px dotted var(--text-secondary);
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .card-row {
+    position: absolute;
+    left: calc(var(--svg-w) + var(--s4));
+    display: flex;
+    align-items: center;
+  }
+
+  .session-hint {
+    position: absolute;
+    left: calc(var(--svg-w) + var(--s4) + var(--s5));
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    height: 22px;
+    font-size: 12px;
+  }
+
+  .hint-glyph {
+    color: var(--text-secondary);
+    opacity: 0.6;
+  }
+
+  .dim {
+    color: var(--text-secondary);
   }
 </style>

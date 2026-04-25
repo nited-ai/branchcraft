@@ -1,6 +1,17 @@
 // Types shared between server and web.
 // Keep this file dependency-free — both Hono and Svelte side import from here.
 
+export interface WorktreeStatus {
+  /** Number of dirty entries (changed, renamed, unmerged, untracked). */
+  dirtyFiles: number;
+  /** Upstream tracking ref (e.g. `origin/main`), or null if unset/detached. */
+  upstream: string | null;
+  /** Commits this worktree is ahead of upstream. */
+  ahead: number;
+  /** Commits this worktree is behind upstream. */
+  behind: number;
+}
+
 export interface Worktree {
   /** Absolute path on disk. */
   path: string;
@@ -14,6 +25,8 @@ export interface Worktree {
   isLocked: boolean;
   /** Marked as prunable (its directory was removed without `git worktree remove`). */
   isPrunable: boolean;
+  /** Working-tree status — omitted when the worktree is unreadable (e.g. prunable). */
+  status?: WorktreeStatus;
 }
 
 export interface ApiHealth {
