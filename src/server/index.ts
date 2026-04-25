@@ -14,6 +14,7 @@ import {
   simStateToCommits,
 } from './git/simulate.ts';
 import { applyCommands } from './git/apply.ts';
+import { listReflog, listStash, listTags } from './git/rucksacks.ts';
 import {
   addRepo as cfgAddRepo,
   findRepoById,
@@ -29,6 +30,7 @@ import type {
   ApiHealth,
   ApiRepoSummary,
   ApiRepos,
+  ApiRucksacks,
   ApiSimulateRequest,
   ApiWorktrees,
   Command,
@@ -245,6 +247,21 @@ app.post('/api/repos/:id/simulate', async (c) => {
   const { commits, laneCount } = assignLanes(projected);
   const out: ApiGraph = { repoPath: repo.path, laneCount, commits };
   return c.json(out);
+});
+
+app.get('/api/repos/:id/rucksacks', async (c) => {
+  const repo = findRepoById(c.req.param('id'));
+  if (!repo) return c.json({ error: 'repo_not_found' }, 404);
+  if (!(await isGitRepo(repo.path))) {
+    return c.json({ error: 'not_a_git_repo', path: repo.path }, 400);
+  }
+  const [stash, tags, reflog] = await Promise.all([
+    listStash(repo.path),
+    listTags(repo.path),
+    listReflog(repo.path, { limit: 100 }),
+  ]);
+  const body: ApiRucksacks = { stash, tags, reflog };
+  return c.json(body);
 });
 
 app.post('/api/repos/:id/apply', async (c) => {

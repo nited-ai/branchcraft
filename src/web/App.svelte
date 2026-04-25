@@ -14,7 +14,12 @@
   import AddRepoModal from './AddRepoModal.svelte';
   import CommandForm from './CommandForm.svelte';
   import QueuePanel from './QueuePanel.svelte';
-  import type { ApplyResult, Command } from '../shared/types.ts';
+  import Rucksacks from './Rucksacks.svelte';
+  import type {
+    ApiRucksacks,
+    ApplyResult,
+    Command,
+  } from '../shared/types.ts';
 
   type Theme = 'dark' | 'light';
 
@@ -37,6 +42,8 @@
   let baseLaneCount = $state(0);
   let applying = $state(false);
   let applyResults = $state<ApplyResult[] | null>(null);
+  let rucksacks = $state<ApiRucksacks | null>(null);
+  let rucksacksLoading = $state(false);
 
   let branchSuggestions = $derived.by(() => {
     const set = new Set<string>();
@@ -102,6 +109,24 @@
     baseLaneCount = gRes.laneCount;
     activeRepoPath = wtRes.repoPath;
     if (queue.length > 0) await refreshSimulation();
+    void loadRucksacks();
+  }
+
+  async function loadRucksacks() {
+    if (!activeRepoId) return;
+    rucksacksLoading = true;
+    try {
+      const res = await fetch(`/api/repos/${activeRepoId}/rucksacks`);
+      if (!res.ok) {
+        rucksacks = null;
+        return;
+      }
+      rucksacks = (await res.json()) as ApiRucksacks;
+    } catch {
+      rucksacks = null;
+    } finally {
+      rucksacksLoading = false;
+    }
   }
 
   async function refreshSimulation() {
@@ -324,6 +349,8 @@
       </p>
     </footer>
   </main>
+
+  <Rucksacks data={rucksacks} loading={rucksacksLoading} />
 </div>
 
 <AddRepoModal
@@ -342,7 +369,7 @@
 <style>
   .layout {
     display: grid;
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: 240px 1fr 240px;
     min-height: 100vh;
   }
 

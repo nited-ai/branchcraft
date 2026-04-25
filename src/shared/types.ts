@@ -166,3 +166,33 @@ export interface ApiApplyResponse {
   /** True iff every command succeeded — useful for client UX. */
   allSucceeded: boolean;
 }
+
+// ── Rucksacks (stash / tags / reflog) ────────────────────────────────────────
+
+export interface StashEntry {
+  index: number;
+  message: string;
+  sha: string;
+  authorDate: number;
+}
+
+export interface TagEntry {
+  name: string;
+  sha: string;
+  message: string;
+  date: number;
+}
+
+export interface ReflogEntry {
+  index: number;
+  sha: string;
+  action: string;
+  message: string;
+  date: number;
+}
+
+export interface ApiRucksacks {
+  stash: StashEntry[];
+  tags: TagEntry[];
+  reflog: ReflogEntry[];
+}
