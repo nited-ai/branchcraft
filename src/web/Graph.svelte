@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { LaidOutCommit, Session, Worktree } from '../shared/types.ts';
+  import type { Command, LaidOutCommit, Session, Worktree } from '../shared/types.ts';
   import WorktreeCard from './WorktreeCard.svelte';
   import SessionPill from './SessionPill.svelte';
 
@@ -7,9 +7,23 @@
     commits: LaidOutCommit[];
     laneCount: number;
     worktrees: Worktree[];
+    onQueueCommand?: (cmd: Command) => void;
   };
 
-  let { commits, laneCount, worktrees }: Props = $props();
+  let { commits, laneCount, worktrees, onQueueCommand }: Props = $props();
+
+  // ── Drag state ────────────────────────────────────────────────────────────
+  // Two interactive sources: commit dots (drag → cherry-pick onto a ref) and
+  // branch-ref pills (drag → merge into another ref). Drop targets are also
+  // ref pills. Native HTML5 drag is awkward inside SVG, so we use plain
+  // pointer events and resolve the drop target via elementsFromPoint.
+  type Drag =
+    | { kind: 'commit'; sha: string; subject: string }
+    | { kind: 'ref'; name: string }
+    | null;
+  let drag = $state<Drag>(null);
+  let dragCursor = $state({ x: 0, y: 0 });
+  let dropTarget = $state<{ refName: string; commitSha?: string } | null>(null);
 
   const ROW_H = 36;
   const LANE_W = 22;
@@ -161,6 +175,68 @@
     }
     return out;
   });
+
+  // ── Drag handlers ─────────────────────────────────────────────────────────
+
+  function startDrag(d: Exclude<Drag, null>, e: PointerEvent) {
+    if (!onQueueCommand) return;
+    drag = d;
+    dragCursor = { x: e.clientX, y: e.clientY };
+    e.preventDefault();
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+  }
+
+  function onPointerMove(e: PointerEvent) {
+    dragCursor = { x: e.clientX, y: e.clientY };
+    const els = document.elementsFromPoint(e.clientX, e.clientY);
+    let found: { refName: string; commitSha?: string } | null = null;
+    for (const el of els) {
+      if (!(el instanceof HTMLElement)) continue;
+      const refName = el.dataset.dropRef;
+      if (refName) {
+        found = { refName };
+        break;
+      }
+    }
+    dropTarget = found;
+  }
+
+  function onPointerUp() {
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+    const target = dropTarget;
+    const d = drag;
+    drag = null;
+    dropTarget = null;
+    if (!target || !d || !onQueueCommand) return;
+    if (d.kind === 'commit') {
+      onQueueCommand({
+        kind: 'cherry-pick',
+        commits: [d.sha],
+        onto: target.refName,
+      });
+    } else if (d.kind === 'ref') {
+      if (d.name === target.refName) return;
+      // Default to merge — disambig popup (PLAN.md §4.4) is a later polish.
+      onQueueCommand({
+        kind: 'merge',
+        from: d.name,
+        into: target.refName,
+        ff: 'auto',
+      });
+    }
+  }
+
+  function onCommitPointerDown(c: LaidOutCommit, e: PointerEvent) {
+    if (e.button !== 0) return;
+    startDrag({ kind: 'commit', sha: c.sha, subject: c.subject }, e);
+  }
+
+  function onRefPointerDown(name: string, e: PointerEvent) {
+    if (e.button !== 0) return;
+    startDrag({ kind: 'ref', name }, e);
+  }
 </script>
 
 <div class="graph" style="--svg-w: {svgWidth}px; height: {totalHeight}px;">
@@ -215,6 +291,10 @@
         />
       {/if}
       <circle
+        class="commit-dot"
+        class:draggable={!r.commit.simulated && onQueueCommand}
+        role={!r.commit.simulated && onQueueCommand ? 'button' : 'img'}
+        aria-label={shortSha(r.commit.sha)}
         cx={laneX(r.commit.lane)}
         cy={r.dotY}
         r={isHead(r.commit) ? HEAD_R : COMMIT_R}
@@ -223,6 +303,7 @@
         stroke-width={r.commit.simulated || isMerge(r.commit) ? 1.5 : 0}
         stroke-dasharray={r.commit.simulated ? '2 2' : undefined}
         opacity={r.commit.simulated ? 0.7 : 1}
+        onpointerdown={!r.commit.simulated && onQueueCommand ? (e) => onCommitPointerDown(r.commit, e) : undefined}
       />
     {/each}
   </svg>
@@ -233,7 +314,16 @@
         <span class="sha mono">{shortSha(r.commit.sha)}</span>
         {#each r.commit.refs as ref (ref.kind + (ref.name ?? ''))}
           {#if ref.name}
-            <span class={`ref ref-${ref.kind}`}>{ref.name}</span>
+            <span
+              class={`ref ref-${ref.kind}`}
+              class:draggable={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')}
+              class:drop-active={dropTarget?.refName === ref.name && drag !== null}
+              role={onQueueCommand ? 'button' : undefined}
+              data-drop-ref={onQueueCommand ? ref.name : undefined}
+              onpointerdown={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')
+                ? (e) => onRefPointerDown(ref.name!, e)
+                : undefined}
+            >{ref.name}</span>
           {/if}
         {/each}
         <span class="subject">{r.commit.subject}</span>
@@ -266,6 +356,26 @@
       </div>
     {/each}
   {/each}
+
+  {#if drag}
+    <div
+      class="drag-ghost mono"
+      style="left: {dragCursor.x + 10}px; top: {dragCursor.y + 6}px"
+      aria-hidden="true"
+    >
+      {#if drag.kind === 'commit'}
+        <span class="kind">cherry-pick</span>
+        <span class="ghost-label">{shortSha(drag.sha)}</span>
+      {:else}
+        <span class="kind">merge</span>
+        <span class="ghost-label">{drag.name}</span>
+      {/if}
+      {#if dropTarget}
+        <span class="arrow">→</span>
+        <span class="ghost-label target">{dropTarget.refName}</span>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -320,6 +430,25 @@
     color: var(--text-primary);
     text-transform: lowercase;
     letter-spacing: 0.02em;
+    user-select: none;
+  }
+
+  .ref.draggable {
+    cursor: grab;
+  }
+
+  .ref.draggable:active {
+    cursor: grabbing;
+  }
+
+  .ref.drop-active {
+    background: rgba(212, 165, 74, 0.18);
+    border-color: var(--branch-2);
+    box-shadow: 0 0 0 2px rgba(212, 165, 74, 0.16);
+  }
+
+  .commit-dot.draggable {
+    cursor: grab;
   }
 
   .ref-head {
@@ -384,6 +513,41 @@
     display: flex;
     align-items: center;
     padding-right: var(--s4);
+  }
+
+  .drag-ghost {
+    position: fixed;
+    z-index: 200;
+    pointer-events: none;
+    background: var(--bg-elevated);
+    border: 1px solid var(--branch-2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .drag-ghost .kind {
+    color: var(--branch-2);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+  }
+
+  .drag-ghost .ghost-label {
+    color: var(--text-primary);
+  }
+
+  .drag-ghost .ghost-label.target {
+    color: var(--success);
+  }
+
+  .drag-ghost .arrow {
+    color: var(--text-secondary);
   }
 
   .hint-glyph {

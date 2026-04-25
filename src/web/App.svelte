@@ -300,7 +300,12 @@
           {laneCount === 1 ? 'lane' : 'lanes'}
         </p>
 
-        <Graph commits={graphCommits} {laneCount} {worktrees} />
+        <Graph
+          commits={graphCommits}
+          {laneCount}
+          {worktrees}
+          onQueueCommand={queueCommand}
+        />
       {/if}
     </section>
 
