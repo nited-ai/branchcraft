@@ -91,7 +91,7 @@
   const isMerge = (c: LaidOutCommit): boolean => c.parents.length > 1;
   const shortSha = (s: string): string => s.slice(0, 7);
 
-  type Edge = { key: string; d: string; color: string };
+  type Edge = { key: string; d: string; color: string; simulated: boolean };
   let edges = $derived.by<Edge[]>(() => {
     const out: Edge[] = [];
     for (const r of rows) {
@@ -112,6 +112,9 @@
             parentRow.dotY,
           ),
           color: laneColor(colorLane),
+          // Edge to / from a simulated commit gets dashed too — keeps the
+          // preview branch visually consistent end-to-end.
+          simulated: c.simulated === true || parentRow.commit.simulated === true,
         });
       }
     }
@@ -196,6 +199,8 @@
         stroke={edge.color}
         stroke-width="1.5"
         stroke-linecap="round"
+        stroke-dasharray={edge.simulated ? '4 3' : undefined}
+        opacity={edge.simulated ? 0.6 : 1}
       />
     {/each}
 
@@ -213,9 +218,11 @@
         cx={laneX(r.commit.lane)}
         cy={r.dotY}
         r={isHead(r.commit) ? HEAD_R : COMMIT_R}
-        fill={isMerge(r.commit) ? 'var(--bg)' : laneColor(r.commit.lane)}
+        fill={r.commit.simulated ? 'var(--bg)' : isMerge(r.commit) ? 'var(--bg)' : laneColor(r.commit.lane)}
         stroke={laneColor(r.commit.lane)}
-        stroke-width={isMerge(r.commit) ? 1.5 : 0}
+        stroke-width={r.commit.simulated || isMerge(r.commit) ? 1.5 : 0}
+        stroke-dasharray={r.commit.simulated ? '2 2' : undefined}
+        opacity={r.commit.simulated ? 0.7 : 1}
       />
     {/each}
   </svg>

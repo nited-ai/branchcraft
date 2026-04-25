@@ -9,6 +9,12 @@ import { gitLog } from './git/log.ts';
 import { assignLanes } from './git/layout.ts';
 import { getWorktreeStatus } from './git/status.ts';
 import {
+  Simulator,
+  buildSimState,
+  simStateToCommits,
+} from './git/simulate.ts';
+import { applyCommands } from './git/apply.ts';
+import {
   addRepo as cfgAddRepo,
   findRepoById,
   loadConfig,
@@ -18,11 +24,14 @@ import {
 import { scanAllSessions } from './sessions/index.ts';
 import type {
   ApiAddRepoRequest,
+  ApiApplyResponse,
   ApiGraph,
   ApiHealth,
   ApiRepoSummary,
   ApiRepos,
+  ApiSimulateRequest,
   ApiWorktrees,
+  Command,
   RepoStatusKind,
   Worktree,
   WorktreeStatus,
@@ -204,6 +213,55 @@ app.get('/api/repos/:id/graph', async (c) => {
   const { commits, laneCount } = assignLanes(raw);
   const body: ApiGraph = { repoPath: repo.path, laneCount, commits };
   return c.json(body);
+});
+
+function isCommand(x: unknown): x is Command {
+  if (!x || typeof x !== 'object') return false;
+  const o = x as Record<string, unknown>;
+  return (
+    o.kind === 'merge' ||
+    o.kind === 'rebase' ||
+    o.kind === 'cherry-pick' ||
+    o.kind === 'reset' ||
+    o.kind === 'push'
+  );
+}
+
+app.post('/api/repos/:id/simulate', async (c) => {
+  const repo = findRepoById(c.req.param('id'));
+  if (!repo) return c.json({ error: 'repo_not_found' }, 404);
+  const body = (await c.req.json().catch(() => null)) as
+    | ApiSimulateRequest
+    | null;
+  if (!body || !Array.isArray(body.commands) || !body.commands.every(isCommand)) {
+    return c.json({ error: 'invalid_commands' }, 400);
+  }
+  const limit = 200;
+  const raw = await gitLog(repo.path, { limit });
+  const initial = buildSimState(raw);
+  const sim = new Simulator({ seed: 'preview' });
+  const after = sim.applyAll(initial, body.commands);
+  const projected = simStateToCommits(after);
+  const { commits, laneCount } = assignLanes(projected);
+  const out: ApiGraph = { repoPath: repo.path, laneCount, commits };
+  return c.json(out);
+});
+
+app.post('/api/repos/:id/apply', async (c) => {
+  const repo = findRepoById(c.req.param('id'));
+  if (!repo) return c.json({ error: 'repo_not_found' }, 404);
+  const body = (await c.req.json().catch(() => null)) as
+    | ApiSimulateRequest
+    | null;
+  if (!body || !Array.isArray(body.commands) || !body.commands.every(isCommand)) {
+    return c.json({ error: 'invalid_commands' }, 400);
+  }
+  const results = await applyCommands(body.commands, { repoPath: repo.path });
+  const out: ApiApplyResponse = {
+    results,
+    allSucceeded: results.every((r) => r.ok),
+  };
+  return c.json(out);
 });
 
 // ── Static frontend (production builds only) ─────────────────────────────────

@@ -12,6 +12,9 @@
   import Graph from './Graph.svelte';
   import RepoSidebar from './RepoSidebar.svelte';
   import AddRepoModal from './AddRepoModal.svelte';
+  import CommandForm from './CommandForm.svelte';
+  import QueuePanel from './QueuePanel.svelte';
+  import type { ApplyResult, Command } from '../shared/types.ts';
 
   type Theme = 'dark' | 'light';
 
@@ -26,6 +29,24 @@
   let loading = $state(true);
   let theme = $state<Theme>('dark');
   let modalOpen = $state(false);
+  let cmdFormOpen = $state(false);
+
+  // Simulator queue + preview state.
+  let queue = $state<Command[]>([]);
+  let baseCommits = $state<LaidOutCommit[]>([]);
+  let baseLaneCount = $state(0);
+  let applying = $state(false);
+  let applyResults = $state<ApplyResult[] | null>(null);
+
+  let branchSuggestions = $derived.by(() => {
+    const set = new Set<string>();
+    for (const c of baseCommits.length ? baseCommits : graphCommits) {
+      for (const r of c.refs) {
+        if (r.name) set.add(r.name);
+      }
+    }
+    return [...set].sort();
+  });
 
   function urlRepoId(): string | null {
     return new URL(location.href).searchParams.get('repo');
@@ -76,8 +97,79 @@
     ]);
     worktrees = wtRes.worktrees;
     graphCommits = gRes.commits;
+    baseCommits = gRes.commits;
     laneCount = gRes.laneCount;
+    baseLaneCount = gRes.laneCount;
     activeRepoPath = wtRes.repoPath;
+    if (queue.length > 0) await refreshSimulation();
+  }
+
+  async function refreshSimulation() {
+    if (!activeRepoId || queue.length === 0) {
+      graphCommits = baseCommits;
+      laneCount = baseLaneCount;
+      return;
+    }
+    try {
+      const res = await fetch(`/api/repos/${activeRepoId}/simulate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ commands: queue }),
+      });
+      if (!res.ok) return;
+      const body = await res.json();
+      graphCommits = body.commits;
+      laneCount = body.laneCount;
+    } catch {
+      // ignore — preview is best-effort
+    }
+  }
+
+  function queueCommand(cmd: Command) {
+    queue = [...queue, cmd];
+    applyResults = null;
+    refreshSimulation();
+  }
+
+  function removeFromQueue(index: number) {
+    queue = queue.filter((_, i) => i !== index);
+    refreshSimulation();
+  }
+
+  function clearQueue() {
+    queue = [];
+    applyResults = null;
+    refreshSimulation();
+  }
+
+  async function applyQueue() {
+    if (!activeRepoId || queue.length === 0 || applying) return;
+    applying = true;
+    applyResults = null;
+    try {
+      const res = await fetch(`/api/repos/${activeRepoId}/apply`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ commands: queue }),
+      });
+      const body = await res.json();
+      applyResults = body.results ?? [];
+      if (body.allSucceeded) {
+        queue = [];
+      }
+      // Always refresh — partial success still mutates the repo.
+      await loadActiveRepo();
+    } catch (e) {
+      applyResults = [
+        {
+          ok: false,
+          command: queue[0]!,
+          error: e instanceof Error ? e.message : String(e),
+        },
+      ];
+    } finally {
+      applying = false;
+    }
   }
 
   function switchRepo(id: string) {
@@ -164,6 +256,11 @@
         <p class="tagline">Visual Git for solo devs and vibe-coding teams.</p>
       </div>
       <button
+        class="cmd-add"
+        onclick={() => (cmdFormOpen = true)}
+        title="Queue a git command"
+      >+ Command</button>
+      <button
         class="theme-toggle"
         onclick={toggleTheme}
         aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -207,6 +304,15 @@
       {/if}
     </section>
 
+    <QueuePanel
+      {queue}
+      {applyResults}
+      {applying}
+      onRemove={removeFromQueue}
+      onClear={clearQueue}
+      onApply={applyQueue}
+    />
+
     <footer>
       <p class="dim">
         pre-MVP scaffold · see <a href="https://github.com/nited-ai/branchcraft/blob/main/PLAN.md">PLAN.md</a>
@@ -219,6 +325,13 @@
   open={modalOpen}
   onClose={() => (modalOpen = false)}
   onAdded={onRepoAdded}
+/>
+
+<CommandForm
+  open={cmdFormOpen}
+  {branchSuggestions}
+  onClose={() => (cmdFormOpen = false)}
+  onAdd={queueCommand}
 />
 
 <style>
@@ -240,7 +353,12 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: var(--s4);
+    gap: var(--s3);
+  }
+
+  header .title {
+    flex: 1;
+    min-width: 0;
   }
 
   header h1 {
@@ -267,6 +385,26 @@
     margin: 0;
     color: var(--text-secondary);
     font-size: 15px;
+  }
+
+  .cmd-add {
+    align-self: flex-start;
+    padding: var(--s2) var(--s3);
+    background: transparent;
+    border: 1px dashed var(--hairline);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+  }
+
+  .cmd-add:hover {
+    color: var(--branch-2);
+    border-color: var(--branch-2);
+    border-style: solid;
+    background: rgba(212, 165, 74, 0.06);
   }
 
   .theme-toggle {

@@ -82,6 +82,8 @@ export interface Commit {
   authorDate: number;
   subject: string;
   refs: RefDecoration[];
+  /** True for commits synthesized by the simulator (not in the real repo). */
+  simulated?: boolean;
 }
 
 export interface LaidOutCommit extends Commit {
@@ -128,4 +130,39 @@ export interface ApiRepos {
 
 export interface ApiAddRepoRequest {
   path: string;
+}
+
+// ── Simulator / queue ────────────────────────────────────────────────────────
+
+export type Sha = string;
+export type RefName = string;
+
+export type Command =
+  | { kind: 'merge'; from: RefName; into: RefName; ff?: 'auto' | 'only' | 'no' }
+  | { kind: 'rebase'; branch: RefName; onto: Sha | RefName }
+  | { kind: 'cherry-pick'; commits: Sha[]; onto: RefName }
+  | {
+      kind: 'reset';
+      branch: RefName;
+      to: Sha | RefName;
+      mode?: 'soft' | 'mixed' | 'hard';
+    }
+  | { kind: 'push'; branch: RefName; remote?: string; force?: 'lease' | true };
+
+export interface ApiSimulateRequest {
+  commands: Command[];
+}
+
+export interface ApplyResult {
+  ok: boolean;
+  command: Command;
+  /** stdout / stderr text from git when relevant. */
+  output?: string;
+  error?: string;
+}
+
+export interface ApiApplyResponse {
+  results: ApplyResult[];
+  /** True iff every command succeeded — useful for client UX. */
+  allSucceeded: boolean;
 }
