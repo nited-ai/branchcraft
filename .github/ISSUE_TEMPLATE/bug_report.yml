@@ -1,0 +1,71 @@
+name: Bug report
+description: Something doesn't work the way the docs say it should.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The more reproducible the report, the faster the fix.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: One paragraph, plain language. Compare expected vs actual.
+      placeholder: I dragged X onto Y, expected Z, but instead saw …
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal repro. The fewer steps, the better.
+      placeholder: |
+        1. `npx branchcraft`
+        2. Click …
+        3. Drag …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: branchcraft version
+      description: Output of `npx branchcraft --version` (or git SHA if running from source).
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other (specify in additional context)
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node / Bun version
+      description: Output of `node --version` or `bun --version`.
+      placeholder: "v20.10.0"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Terminal output from where you ran branchcraft. Drop screenshots here.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that might help — repo size, AI tools running, recent git operations.

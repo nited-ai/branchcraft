@@ -1,0 +1,42 @@
+name: Feature request
+description: Use only for concrete, scoped feature work. For brainstorming and ideas, please open a Discussion instead.
+title: "[feat] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For broader ideas or design discussion, please use [Discussions / Ideas](https://github.com/nited-ai/branchcraft/discussions/categories/ideas) instead. Issues are for scoped work that is ready to start.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: User-facing problem in one paragraph. Avoid jumping to a solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: How would you solve it? Drag gesture? New panel? New command?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you think about? Why is the proposal better?
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      description: Has this been considered already?
+      options:
+        - label: I checked PLAN.md §10 (Out of Scope) and this is not explicitly excluded.
+          required: true
+        - label: I checked open Discussions and this isn't already being discussed.
+          required: true

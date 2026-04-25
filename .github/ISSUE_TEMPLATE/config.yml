@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Design feedback (pre-MVP)
+    url: https://github.com/nited-ai/branchcraft/discussions/1
+    about: Shape the design before code lands. The design review thread is open until MVP ships.
+  - name: Feature ideas / new gestures / new providers
+    url: https://github.com/nited-ai/branchcraft/discussions/categories/ideas
+    about: Discussion-first for anything that's not a clear bug.
+  - name: Questions / how do I…?
+    url: https://github.com/nited-ai/branchcraft/discussions/categories/q-a
+    about: General questions go here so the answer is searchable for others.
