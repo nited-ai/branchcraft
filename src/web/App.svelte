@@ -8,7 +8,11 @@
     ApiRepoSummary,
     Worktree,
     LaidOutCommit,
+    ActivityEvent,
+    ConcurrentConflict,
+    DivergenceConflict,
   } from '../shared/types.ts';
+  import { subscribeActivity } from './lib/sse.ts';
   import Graph from './Graph.svelte';
   import RepoSidebar from './RepoSidebar.svelte';
   import AddRepoModal from './AddRepoModal.svelte';
@@ -56,6 +60,39 @@
   function closeApplyModal() {
     applyModal = null;
   }
+
+  let activityEvents = $state<ActivityEvent[]>([]);
+  let concurrentByFile = $state(new Map<string, ConcurrentConflict>());
+  let divergenceByBranch = $state(new Map<string, DivergenceConflict>());
+
+  let activityUnsub: (() => void) | null = null;
+
+  $effect(() => {
+    activityUnsub?.();
+    activityUnsub = null;
+    if (!activeRepoId) return;
+    activityUnsub = subscribeActivity(activeRepoId, {
+      onSnapshot: (s) => {
+        activityEvents = s.events;
+        concurrentByFile = new Map(s.concurrent.map((c) => [c.file, c] as const));
+        divergenceByBranch = new Map(s.divergence.map((d) => [d.branch, d] as const));
+      },
+      onActivity: (e) => {
+        activityEvents = [e, ...activityEvents].slice(0, 200);
+      },
+      onConflict: (c) => {
+        if (c.kind === 'concurrent') {
+          const next = new Map(concurrentByFile);
+          next.set(c.file, c);
+          concurrentByFile = next;
+        } else {
+          const next = new Map(divergenceByBranch);
+          next.set(c.branch, c);
+          divergenceByBranch = next;
+        }
+      },
+    });
+  });
 
   // Simulator queue + preview state.
   let queue = $state<Command[]>([]);
@@ -139,6 +176,9 @@
       }),
     ]);
     worktrees = wtRes.worktrees;
+    if (Array.isArray(wtRes.divergence)) {
+      divergenceByBranch = new Map(wtRes.divergence.map((d) => [d.branch, d] as const));
+    }
     graphCommits = gRes.commits;
     baseCommits = gRes.commits;
     laneCount = gRes.laneCount;
