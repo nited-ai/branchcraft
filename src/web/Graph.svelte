@@ -34,6 +34,10 @@
   const HINT_H = 18;
   const PILL_H = 24;
   const CARD_GAP = 4;
+  /** Collapsed-run row height — short, since it's a placeholder. */
+  const COLLAPSED_H = 22;
+  /** Min consecutive plain commits before we fold them. */
+  const COLLAPSE_THRESHOLD = 3;
 
   const laneX = (lane: number): number => PAD + lane * LANE_W + LANE_W / 2;
 
@@ -47,13 +51,37 @@
     return map;
   });
 
-  type Row = {
-    commit: LaidOutCommit;
-    worktrees: Worktree[];
-    top: number;
-    dotY: number;
-    height: number;
-  };
+  // ── Collapse plain commits into folded runs ──────────────────────────────
+  // A commit is "plain" if it has no decoration AND no worktree at its sha
+  // AND isn't simulated. Three or more consecutive plain commits collapse
+  // into a single short row showing "▸ N commits".
+  let expandedRuns = $state(new Set<string>());
+
+  function isPlain(c: LaidOutCommit, wts: Worktree[]): boolean {
+    if (c.simulated) return false;
+    if (c.refs.length > 0) return false;
+    if (wts.length > 0) return false;
+    return true;
+  }
+
+  type Row =
+    | {
+        kind: 'commit';
+        commit: LaidOutCommit;
+        worktrees: Worktree[];
+        top: number;
+        dotY: number;
+        height: number;
+      }
+    | {
+        kind: 'collapsed';
+        key: string;
+        commits: LaidOutCommit[];
+        lane: number;
+        top: number;
+        dotY: number;
+        height: number;
+      };
 
   function worktreeBlockHeight(wt: Worktree): number {
     const sessionH = wt.sessions.length === 0
@@ -63,29 +91,91 @@
   }
 
   let rows = $derived.by<Row[]>(() => {
-    const result: Row[] = [];
-    let top = PAD;
+    type Group =
+      | { kind: 'commit'; commit: LaidOutCommit; worktrees: Worktree[] }
+      | { kind: 'run'; key: string; commits: LaidOutCommit[]; lane: number };
+    const groups: Group[] = [];
+    let buf: LaidOutCommit[] = [];
+    const flush = () => {
+      if (buf.length === 0) return;
+      if (buf.length >= COLLAPSE_THRESHOLD) {
+        const key = `${buf[0]!.sha}..${buf[buf.length - 1]!.sha}`;
+        if (expandedRuns.has(key)) {
+          for (const c of buf) groups.push({ kind: 'commit', commit: c, worktrees: [] });
+        } else {
+          groups.push({ kind: 'run', key, commits: buf, lane: buf[0]!.lane });
+        }
+      } else {
+        for (const c of buf) groups.push({ kind: 'commit', commit: c, worktrees: [] });
+      }
+      buf = [];
+    };
     for (const c of commits) {
       const wts = worktreesByCommit.get(c.sha) ?? [];
-      let extras = 0;
-      if (wts.length > 0) {
-        extras = CARD_GAP;
-        for (const wt of wts) extras += worktreeBlockHeight(wt);
+      if (isPlain(c, wts)) {
+        buf.push(c);
+      } else {
+        flush();
+        groups.push({ kind: 'commit', commit: c, worktrees: wts });
       }
-      const height = ROW_H + extras;
-      result.push({
-        commit: c,
-        worktrees: wts,
-        top,
-        dotY: top + ROW_H / 2,
-        height,
-      });
-      top += height;
+    }
+    flush();
+
+    const result: Row[] = [];
+    let top = PAD;
+    for (const g of groups) {
+      if (g.kind === 'commit') {
+        let extras = 0;
+        if (g.worktrees.length > 0) {
+          extras = CARD_GAP;
+          for (const wt of g.worktrees) extras += worktreeBlockHeight(wt);
+        }
+        const height = ROW_H + extras;
+        result.push({
+          kind: 'commit',
+          commit: g.commit,
+          worktrees: g.worktrees,
+          top,
+          dotY: top + ROW_H / 2,
+          height,
+        });
+        top += height;
+      } else {
+        result.push({
+          kind: 'collapsed',
+          key: g.key,
+          commits: g.commits,
+          lane: g.lane,
+          top,
+          dotY: top + COLLAPSED_H / 2,
+          height: COLLAPSED_H,
+        });
+        top += COLLAPSED_H;
+      }
     }
     return result;
   });
 
-  let bySha = $derived(new Map(rows.map((r) => [r.commit.sha, r] as const)));
+  /**
+   * Map every commit sha (visible OR hidden inside a collapsed run) to the
+   * row that represents it. Edges crossing a collapsed run land on the
+   * collapsed row's dot position rather than on a non-rendered commit.
+   */
+  let rowBySha = $derived.by(() => {
+    const m = new Map<string, Row>();
+    for (const r of rows) {
+      if (r.kind === 'commit') m.set(r.commit.sha, r);
+      else for (const c of r.commits) m.set(c.sha, r);
+    }
+    return m;
+  });
+
+  function toggleRun(key: string) {
+    const next = new Set(expandedRuns);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    expandedRuns = next;
+  }
 
   let svgWidth = $derived(PAD + Math.max(1, laneCount) * LANE_W + PAD / 2);
   let totalHeight = $derived.by(() => {
@@ -109,26 +199,33 @@
   let edges = $derived.by<Edge[]>(() => {
     const out: Edge[] = [];
     for (const r of rows) {
+      if (r.kind !== 'commit') continue;
       const c = r.commit;
       for (let i = 0; i < c.parents.length; i++) {
         const parentSha = c.parents[i]!;
-        const parentRow = bySha.get(parentSha);
+        const parentRow = rowBySha.get(parentSha);
         const parentLane = c.parentLanes[i];
         if (!parentRow || parentLane === undefined) continue;
-        const childLane = i === 0 ? c.lane : parentLane;
-        const colorLane = i === 0 ? c.lane : parentLane;
+        // If the parent fell into a collapsed run, draw the edge to that
+        // run's lane (it's a homogeneous run on a single lane).
+        const targetLane =
+          parentRow.kind === 'collapsed' ? parentRow.lane : parentLane;
+        const childLane = i === 0 ? c.lane : targetLane;
+        const colorLane = i === 0 ? c.lane : targetLane;
+        const parentSimulated =
+          parentRow.kind === 'commit' && parentRow.commit.simulated === true;
         out.push({
           key: `${c.sha}->${parentSha}#${i}`,
           d: pathBetween(
             laneX(childLane),
             r.dotY,
-            laneX(parentLane),
+            laneX(targetLane),
             parentRow.dotY,
           ),
           color: laneColor(colorLane),
           // Edge to / from a simulated commit gets dashed too — keeps the
           // preview branch visually consistent end-to-end.
-          simulated: c.simulated === true || parentRow.commit.simulated === true,
+          simulated: c.simulated === true || parentSimulated,
         });
       }
     }
@@ -150,6 +247,7 @@
   let cardLayouts = $derived.by<CardLayout[]>(() => {
     const out: CardLayout[] = [];
     for (const r of rows) {
+      if (r.kind !== 'commit') continue;
       const dotX = laneX(r.commit.lane);
       let cursor = r.top + ROW_H + CARD_GAP;
       for (const wt of r.worktrees) {
@@ -280,54 +378,85 @@
       />
     {/each}
 
-    {#each rows as r (r.commit.sha)}
-      {#if isHead(r.commit)}
+    {#each rows as r (r.kind === 'commit' ? r.commit.sha : r.key)}
+      {#if r.kind === 'commit'}
+        {#if isHead(r.commit)}
+          <circle
+            cx={laneX(r.commit.lane)}
+            cy={r.dotY}
+            r={HEAD_R + 4}
+            fill={laneColor(r.commit.lane)}
+            fill-opacity="0.18"
+          />
+        {/if}
         <circle
+          class="commit-dot"
+          class:draggable={!r.commit.simulated && onQueueCommand}
+          role={!r.commit.simulated && onQueueCommand ? 'button' : 'img'}
+          aria-label={shortSha(r.commit.sha)}
           cx={laneX(r.commit.lane)}
           cy={r.dotY}
-          r={HEAD_R + 4}
-          fill={laneColor(r.commit.lane)}
-          fill-opacity="0.18"
+          r={isHead(r.commit) ? HEAD_R : COMMIT_R}
+          fill={r.commit.simulated ? 'var(--bg)' : isMerge(r.commit) ? 'var(--bg)' : laneColor(r.commit.lane)}
+          stroke={laneColor(r.commit.lane)}
+          stroke-width={r.commit.simulated || isMerge(r.commit) ? 1.5 : 0}
+          stroke-dasharray={r.commit.simulated ? '2 2' : undefined}
+          opacity={r.commit.simulated ? 0.7 : 1}
+          onpointerdown={!r.commit.simulated && onQueueCommand ? (e) => onCommitPointerDown(r.commit, e) : undefined}
+        />
+      {:else}
+        <!-- Collapsed run: short vertical lane segment so the line stays continuous -->
+        <line
+          x1={laneX(r.lane)}
+          y1={r.top}
+          x2={laneX(r.lane)}
+          y2={r.top + r.height}
+          stroke={laneColor(r.lane)}
+          stroke-width="1.5"
+          stroke-dasharray="3 2"
+          opacity="0.5"
         />
       {/if}
-      <circle
-        class="commit-dot"
-        class:draggable={!r.commit.simulated && onQueueCommand}
-        role={!r.commit.simulated && onQueueCommand ? 'button' : 'img'}
-        aria-label={shortSha(r.commit.sha)}
-        cx={laneX(r.commit.lane)}
-        cy={r.dotY}
-        r={isHead(r.commit) ? HEAD_R : COMMIT_R}
-        fill={r.commit.simulated ? 'var(--bg)' : isMerge(r.commit) ? 'var(--bg)' : laneColor(r.commit.lane)}
-        stroke={laneColor(r.commit.lane)}
-        stroke-width={r.commit.simulated || isMerge(r.commit) ? 1.5 : 0}
-        stroke-dasharray={r.commit.simulated ? '2 2' : undefined}
-        opacity={r.commit.simulated ? 0.7 : 1}
-        onpointerdown={!r.commit.simulated && onQueueCommand ? (e) => onCommitPointerDown(r.commit, e) : undefined}
-      />
     {/each}
   </svg>
 
   <ol class="labels">
-    {#each rows as r (r.commit.sha)}
-      <li style="top: {r.top}px; height: {ROW_H}px;">
-        <span class="sha mono">{shortSha(r.commit.sha)}</span>
-        {#each r.commit.refs as ref (ref.kind + (ref.name ?? ''))}
-          {#if ref.name}
-            <span
-              class={`ref ref-${ref.kind}`}
-              class:draggable={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')}
-              class:drop-active={dropTarget?.refName === ref.name && drag !== null}
-              role={onQueueCommand ? 'button' : undefined}
-              data-drop-ref={onQueueCommand ? ref.name : undefined}
-              onpointerdown={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')
-                ? (e) => onRefPointerDown(ref.name!, e)
-                : undefined}
-            >{ref.name}</span>
-          {/if}
-        {/each}
-        <span class="subject">{r.commit.subject}</span>
-      </li>
+    {#each rows as r (r.kind === 'commit' ? r.commit.sha : r.key)}
+      {#if r.kind === 'commit'}
+        <li style="top: {r.top}px; height: {ROW_H}px;">
+          <span class="sha mono">{shortSha(r.commit.sha)}</span>
+          {#each r.commit.refs as ref (ref.kind + (ref.name ?? ''))}
+            {#if ref.name}
+              <span
+                class={`ref ref-${ref.kind}`}
+                class:draggable={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')}
+                class:drop-active={dropTarget?.refName === ref.name && drag !== null}
+                role={onQueueCommand ? 'button' : undefined}
+                data-drop-ref={onQueueCommand ? ref.name : undefined}
+                onpointerdown={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')
+                  ? (e) => onRefPointerDown(ref.name!, e)
+                  : undefined}
+              >{ref.name}</span>
+            {/if}
+          {/each}
+          <span class="subject">{r.commit.subject}</span>
+        </li>
+      {:else}
+        <li style="top: {r.top}px; height: {r.height}px;" class="collapsed-row">
+          <button
+            class="collapse-toggle"
+            onclick={() => toggleRun(r.key)}
+            title="Show {r.commits.length} hidden commits"
+          >
+            <span class="chev mono" aria-hidden="true">▸</span>
+            <span class="count mono">{r.commits.length}</span>
+            <span class="lbl">commits</span>
+            <span class="range mono">
+              {shortSha(r.commits[0]!.sha)}…{shortSha(r.commits[r.commits.length - 1]!.sha)}
+            </span>
+          </button>
+        </li>
+      {/if}
     {/each}
   </ol>
 
@@ -449,6 +578,52 @@
 
   .commit-dot.draggable {
     cursor: grab;
+  }
+
+  .collapsed-row {
+    padding-left: var(--s4);
+  }
+
+  .collapse-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    background: transparent;
+    border: 1px dashed var(--hairline);
+    border-radius: 4px;
+    padding: 2px 8px;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: color 100ms ease, border-color 100ms ease;
+  }
+
+  .collapse-toggle:hover {
+    color: var(--branch-2);
+    border-color: var(--branch-2);
+    border-style: solid;
+  }
+
+  .collapse-toggle .chev {
+    color: var(--branch-2);
+    font-size: 10px;
+  }
+
+  .collapse-toggle .count {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .collapse-toggle .lbl {
+    color: var(--text-secondary);
+  }
+
+  .collapse-toggle .range {
+    color: var(--text-secondary);
+    font-size: 10px;
+    margin-left: var(--s2);
+    opacity: 0.7;
   }
 
   .ref-head {
