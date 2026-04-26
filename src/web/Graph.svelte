@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ActivityEvent, Command, LaidOutCommit, RefDecoration, RefKind, Session, Worktree } from '../shared/types.ts';
+  import type { ActivityEvent, Command, DivergenceConflict, LaidOutCommit, RefDecoration, RefKind, Session, Worktree } from '../shared/types.ts';
   import WorktreeCard from './WorktreeCard.svelte';
   import SessionPill from './SessionPill.svelte';
   import ContextHelp from './ContextHelp.svelte';
@@ -22,9 +22,10 @@
     }) => void;
     recentActivity: Map<string, ActivityEvent>;
     conflictFiles: Set<string>;
+    divergenceByBranch: Map<string, DivergenceConflict>;
   };
 
-  let { commits, laneCount, worktrees, onQueueCommand, onOpenApplyModal, recentActivity, conflictFiles }: Props = $props();
+  let { commits, laneCount, worktrees, onQueueCommand, onOpenApplyModal, recentActivity, conflictFiles, divergenceByBranch }: Props = $props();
 
   // ── Hover help overlay ────────────────────────────────────────────────────
   // Cursor-tracking floating panel that explains what each interactive
@@ -992,6 +993,22 @@
                   onmouseenter={(e) => showHelp(helpForRef(ref), e)}
                   onmouseleave={hideHelp}
                 >{ref.name}</span>
+                {#if (ref.kind === 'branch' || ref.kind === 'head') && ref.name && divergenceByBranch.has(ref.name)}
+                  {@const d = divergenceByBranch.get(ref.name)!}
+                  <span
+                    class="ref-badge mono"
+                    title={`Conflicts at merge with ${d.siblings.join(', ')}`}
+                    onmouseenter={(e) => showHelp({
+                      kind: 'divergence',
+                      title: ref.name!,
+                      body: `This branch has committed edits to ${d.overlap.length} file${d.overlap.length === 1 ? '' : 's'} that other branches also touched. A merge would conflict on at least: ${d.overlap.slice(0, 3).join(', ')}${d.overlap.length > 3 ? '…' : ''}.`,
+                      hint: `Sibling branches: ${d.siblings.join(', ')}.`,
+                    }, e)}
+                    onmouseleave={hideHelp}
+                    role="img"
+                    aria-label="{d.siblings.length} divergence conflicts"
+                  >⚠{d.siblings.length}</span>
+                {/if}
               {/if}
             {/if}
           {/each}
@@ -1573,5 +1590,20 @@
 
   .dim {
     color: var(--text-secondary);
+  }
+
+  .ref-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    background: rgba(212, 165, 74, 0.12);
+    border: 1px solid rgba(212, 165, 74, 0.35);
+    color: var(--warning);
+    margin-left: -2px;
+    margin-right: 2px;
+    cursor: help;
+    user-select: none;
   }
 </style>

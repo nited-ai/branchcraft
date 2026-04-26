@@ -466,6 +466,7 @@
           onOpenApplyModal={openApplyModal}
           recentActivity={recentActivity}
           conflictFiles={conflictFiles}
+          divergenceByBranch={divergenceByBranch}
         />
       {/if}
     </section>
