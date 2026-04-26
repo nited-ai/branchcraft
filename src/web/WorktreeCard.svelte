@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { Worktree } from '../shared/types.ts';
 
-  type Props = { worktree: Worktree };
-  let { worktree }: Props = $props();
+  type Props = { worktree: Worktree; draggable?: boolean };
+  let { worktree, draggable = true }: Props = $props();
 
   const folderName = (path: string): string => {
     const parts = path.split(/[/\\]/).filter(Boolean);
@@ -17,7 +17,7 @@
   );
 </script>
 
-<div class="card" class:stale={isStale} class:locked={worktree.isLocked}>
+<div class="card" class:stale={isStale} class:locked={worktree.isLocked} class:draggable={draggable}>
   <span class="folder mono" title={worktree.path}>
     {folderName(worktree.path)}
   </span>
@@ -59,11 +59,14 @@
     background: var(--bg-elevated);
     font-size: 12px;
     white-space: nowrap;
-    cursor: grab;
     user-select: none;
   }
 
-  .card:active {
+  .card.draggable {
+    cursor: grab;
+  }
+
+  .card.draggable:active {
     cursor: grabbing;
   }
 

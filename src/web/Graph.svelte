@@ -506,8 +506,11 @@
         onQueueCommand({ kind: 'checkout', worktree: target.worktreePath, target: d.sha });
       } else if (d.kind === 'ref') {
         onQueueCommand({ kind: 'checkout', worktree: target.worktreePath, target: d.name });
+      } else if (d.kind === 'worktree') {
+        // worktree → worktree drop is meaningless — silently ignore.
+      } else {
+        assertNever(d);
       }
-      // worktree → worktree drop is meaningless — silently ignore.
     }
   }
 
@@ -522,10 +525,8 @@
   }
 
   function onWorktreePointerDown(wt: Worktree, e: PointerEvent) {
+    // Left button only — middle/right click is for the OS / app menus.
     if (e.button !== 0) return;
-    // Cards are also drop targets — only start a drag when the cursor is
-    // actually on the card itself, not on something inside that bubbled up.
-    if (!(e.currentTarget instanceof HTMLElement)) return;
     startDrag({ kind: 'worktree', path: wt.path, branch: wt.branch }, e);
   }
 
@@ -668,6 +669,12 @@
     body: 'Folded because there are enough sessions here to clutter the card. The number is total — the “live” count is how many were active in the last 2 minutes.',
     hint: 'Click to see them all.',
   };
+
+  /** Compile-time exhaustiveness check — call from a switch's “unreachable”
+   *  arm to make TS yell if a new union variant gets added without handling. */
+  function assertNever(_: never): never {
+    throw new Error('unreachable');
+  }
 </script>
 
 <div
@@ -869,7 +876,7 @@
       onmouseleave={hideHelp}
       role="presentation"
     >
-      <WorktreeCard worktree={card.worktree} />
+      <WorktreeCard worktree={card.worktree} draggable={!!onQueueCommand} />
     </div>
     {#if card.hintTop !== null}
       <div class="session-hint" style="top: {card.hintTop}px;">
