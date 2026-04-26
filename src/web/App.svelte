@@ -16,6 +16,7 @@
   import QueuePanel from './QueuePanel.svelte';
   import Rucksacks from './Rucksacks.svelte';
   import Coachmark from './Coachmark.svelte';
+  import Legend from './Legend.svelte';
   import type {
     ApiRucksacks,
     ApplyResult,
@@ -387,6 +388,7 @@
           {laneCount === 1 ? 'lane' : 'lanes'}
         </p>
 
+        <Legend />
         <Graph
           commits={graphCommits}
           {laneCount}

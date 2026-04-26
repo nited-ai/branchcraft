@@ -1,7 +1,9 @@
 <script lang="ts">
-  import type { Command, LaidOutCommit, Session, Worktree } from '../shared/types.ts';
+  import type { Command, LaidOutCommit, RefDecoration, Session, Worktree } from '../shared/types.ts';
   import WorktreeCard from './WorktreeCard.svelte';
   import SessionPill from './SessionPill.svelte';
+  import ContextHelp from './ContextHelp.svelte';
+  import type { HelpContent } from './ContextHelp.svelte';
 
   type Props = {
     commits: LaidOutCommit[];
@@ -11,6 +13,25 @@
   };
 
   let { commits, laneCount, worktrees, onQueueCommand }: Props = $props();
+
+  // ── Hover help overlay ────────────────────────────────────────────────────
+  // Cursor-tracking floating panel that explains what each interactive
+  // element does. New users discover affordances (drag to cherry-pick,
+  // background-task semantics) without reading docs. Old users won't
+  // notice it because the panel is small, dim, and pointer-events:none.
+  let helpContent = $state<HelpContent | null>(null);
+  let cursorPos = $state({ x: 0, y: 0 });
+
+  function showHelp(content: HelpContent, e: MouseEvent) {
+    helpContent = content;
+    cursorPos = { x: e.clientX, y: e.clientY };
+  }
+  function hideHelp() {
+    helpContent = null;
+  }
+  function trackCursor(e: MouseEvent) {
+    if (helpContent) cursorPos = { x: e.clientX, y: e.clientY };
+  }
 
   // ── Drag state ────────────────────────────────────────────────────────────
   // Two interactive sources: commit dots (drag → cherry-pick onto a ref) and
@@ -479,9 +500,140 @@
     if (e.button !== 0) return;
     startDrag({ kind: 'ref', name }, e);
   }
+
+  // ── Help-content builders ────────────────────────────────────────────────
+
+  function helpForCommit(c: LaidOutCommit): HelpContent {
+    if (c.simulated) {
+      return {
+        kind: 'preview commit',
+        title: shortSha(c.sha),
+        body: `What ${c.subject || 'a queued operation'} would create. Synthesised by the simulator — nothing is actually written until you click Apply.`,
+      };
+    }
+    return {
+      kind: 'commit',
+      title: shortSha(c.sha),
+      body: c.subject || '(no subject)',
+      ...(onQueueCommand
+        ? { hint: 'Drag onto a branch label to queue a cherry-pick of this commit.' }
+        : {}),
+    };
+  }
+
+  function helpForRef(ref: RefDecoration): HelpContent {
+    if (ref.kind === 'remote') {
+      return {
+        kind: 'remote ref',
+        title: ref.name ?? '(unnamed)',
+        body: 'Where the remote branch was at the last fetch. Read-only — push to update it.',
+      };
+    }
+    if (ref.kind === 'tag') {
+      return {
+        kind: 'tag',
+        title: ref.name ?? '(unnamed)',
+        body: 'Annotated or lightweight git tag pointing at this commit.',
+      };
+    }
+    if (ref.kind === 'head') {
+      return {
+        kind: 'head',
+        title: ref.name ?? 'detached',
+        body: ref.name
+          ? `Currently checked out branch — HEAD points to "${ref.name}".`
+          : 'HEAD is detached — no branch is currently checked out.',
+        ...(onQueueCommand
+          ? { hint: 'Drag onto another branch to queue a merge into it.' }
+          : {}),
+      };
+    }
+    return {
+      kind: 'branch',
+      title: ref.name ?? '(unnamed)',
+      body: 'Local branch ref. Drop a commit here to cherry-pick onto it.',
+      ...(onQueueCommand
+        ? { hint: 'Drag onto another branch to merge this one into it.' }
+        : {}),
+    };
+  }
+
+  function helpForSession(s: Session): HelpContent {
+    if (s.source === 'scheduled-task') {
+      return {
+        kind: 'background task',
+        title: s.title,
+        body: 'Automated session — fired by a scheduled task, not started by you. Listed for completeness; not actionable from here.',
+      };
+    }
+    if (s.source === 'command') {
+      return {
+        kind: 'slash-command session',
+        title: s.title,
+        body: 'You started this session by running a slash-command. The first message is the command invocation, not a chat prompt.',
+      };
+    }
+    return {
+      kind: 'conversation',
+      title: s.title,
+      body: s.isLive
+        ? 'Active session — last write within the past two minutes.'
+        : `Idle conversation — last activity ${ageWords(s.lastActivity)} ago.`,
+    };
+  }
+
+  function helpForWorktree(wt: Worktree): HelpContent {
+    const dirty = wt.status?.dirtyFiles ?? 0;
+    const ahead = wt.status?.ahead ?? 0;
+    const behind = wt.status?.behind ?? 0;
+    const parts: string[] = [];
+    if (dirty === 0) parts.push('clean');
+    else parts.push(`${dirty} dirty file${dirty === 1 ? '' : 's'}`);
+    if (behind > 0) parts.push(`${behind} commit${behind === 1 ? '' : 's'} behind upstream`);
+    if (ahead > 0) parts.push(`${ahead} ahead`);
+    return {
+      kind: 'worktree',
+      title: wt.path,
+      body: `Checked out on ${wt.branch ?? '(detached HEAD)'}. ${parts.join(', ')}.`,
+    };
+  }
+
+  function ageWords(unixSeconds: number): string {
+    const sec = Math.floor(Date.now() / 1000) - unixSeconds;
+    if (sec < 60) return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec / 60)} min`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)} h`;
+    return `${Math.floor(sec / 86400)} d`;
+  }
+
+  const FOLD_HELP: HelpContent = {
+    kind: 'fold',
+    title: 'collapsed run',
+    body: 'A run of plain commits with no branches or worktrees attached has been folded to keep the graph scannable.',
+    hint: 'Click to expand. Click again on the chevron to fold back.',
+  };
+
+  const TASK_FOLD_HELP: HelpContent = {
+    kind: 'fold',
+    title: 'background tasks',
+    body: 'Sessions started by scheduled tasks or other automation, not by you typing. Folded by default so they don’t crowd out real conversations.',
+    hint: 'Click to inspect — but you usually don’t need to.',
+  };
+
+  const CONVERSATION_FOLD_HELP: HelpContent = {
+    kind: 'fold',
+    title: 'conversations',
+    body: 'AI sessions started by you — chats and slash-commands. Folded once there are several.',
+    hint: 'Click to expand.',
+  };
 </script>
 
-<div class="graph" style="--svg-w: {svgWidth}px; height: {totalHeight}px;">
+<div
+  class="graph"
+  style="--svg-w: {svgWidth}px; height: {totalHeight}px;"
+  onmousemove={trackCursor}
+  role="presentation"
+>
   <svg
     class="graph-svg"
     width={svgWidth}
@@ -547,6 +699,8 @@
           stroke-dasharray={r.commit.simulated ? '2 2' : undefined}
           opacity={r.commit.simulated ? 0.7 : 1}
           onpointerdown={!r.commit.simulated && onQueueCommand ? (e) => onCommitPointerDown(r.commit, e) : undefined}
+          onmouseenter={(e) => showHelp(helpForCommit(r.commit), e)}
+          onmouseleave={hideHelp}
         />
       {:else if !r.expanded}
         <!-- Folded run: short dashed segment so the lane stays visually continuous. -->
@@ -580,6 +734,8 @@
                 onpointerdown={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')
                   ? (e) => onRefPointerDown(ref.name!, e)
                   : undefined}
+                onmouseenter={(e) => showHelp(helpForRef(ref), e)}
+                onmouseleave={hideHelp}
               >{ref.name}</span>
             {/if}
           {/each}
@@ -594,6 +750,8 @@
           <button
             class="collapse-toggle"
             onclick={() => toggleRun(r.key)}
+            onmouseenter={(e) => showHelp(FOLD_HELP, e)}
+            onmouseleave={hideHelp}
             title={r.expanded
               ? `Collapse these ${r.commits.length} commits`
               : `Show ${r.commits.length} hidden commits`}
@@ -622,7 +780,13 @@
       "
       aria-hidden="true"
     ></span>
-    <div class="card-row" style="top: {card.top}px;">
+    <div
+      class="card-row"
+      style="top: {card.top}px;"
+      onmouseenter={(e) => showHelp(helpForWorktree(card.worktree), e)}
+      onmouseleave={hideHelp}
+      role="presentation"
+    >
       <WorktreeCard worktree={card.worktree} />
     </div>
     {#if card.hintTop !== null}
@@ -636,6 +800,8 @@
         <button
           class="session-fold-btn"
           onclick={() => toggleSessions(card.worktree.path)}
+          onmouseenter={(e) => showHelp(CONVERSATION_FOLD_HELP, e)}
+          onmouseleave={hideHelp}
           title={card.sessionFold.expanded
             ? 'Hide conversations'
             : `Show ${card.sessionFold.total} conversations`}
@@ -651,7 +817,13 @@
       </div>
     {/if}
     {#each card.sessions as s (s.key)}
-      <div class="session-row" style="top: {s.top}px;">
+      <div
+        class="session-row"
+        style="top: {s.top}px;"
+        onmouseenter={(e) => showHelp(helpForSession(s.session), e)}
+        onmouseleave={hideHelp}
+        role="presentation"
+      >
         <SessionPill session={s.session} />
       </div>
     {/each}
@@ -660,6 +832,8 @@
         <button
           class="session-fold-btn task-fold-btn"
           onclick={() => toggleTasks(card.worktree.path)}
+          onmouseenter={(e) => showHelp(TASK_FOLD_HELP, e)}
+          onmouseleave={hideHelp}
           title={card.tasksFold.expanded
             ? 'Hide background tasks'
             : `Show ${card.tasksFold.total} background tasks (scheduled / automated, not chats)`}
@@ -671,11 +845,19 @@
       </div>
     {/if}
     {#each card.tasks as s (s.key)}
-      <div class="session-row session-row-task" style="top: {s.top}px;">
+      <div
+        class="session-row session-row-task"
+        style="top: {s.top}px;"
+        onmouseenter={(e) => showHelp(helpForSession(s.session), e)}
+        onmouseleave={hideHelp}
+        role="presentation"
+      >
         <SessionPill session={s.session} />
       </div>
     {/each}
   {/each}
+
+  <ContextHelp content={helpContent} x={cursorPos.x} y={cursorPos.y} />
 
   {#if drag}
     <div
