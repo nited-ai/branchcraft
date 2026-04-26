@@ -30,6 +30,15 @@
   let values = $state<Record<string, string>>({});
   let inputEl = $state<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
+  // Svelte 5 rejects the conditional `bind:this={i === 0 ? inputEl : null}`
+  // form, so we capture the first field's element via an inline action
+  // instead. The action receives the element on mount and the field index
+  // as a parameter; we only stash the ref when the index is 0.
+  function maybeRef(node: HTMLInputElement | HTMLTextAreaElement, idx: number) {
+    if (idx === 0) inputEl = node;
+    return {};
+  }
+
   // Reset values when the modal opens with a new field set.
   $effect(() => {
     if (open) {
@@ -58,51 +67,38 @@
 </script>
 
 {#if open}
-  <div class="backdrop" role="dialog" aria-modal="true" aria-label={title} tabindex="-1" onkeydown={onKey}>
+  <div
+    class="backdrop"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="apply-modal-title"
+    tabindex="-1"
+    onkeydown={onKey}
+  >
     <form class="modal" onsubmit={submit}>
-      <h2>{title}</h2>
+      <h2 id="apply-modal-title">{title}</h2>
       {#if intro}<p class="intro">{intro}</p>{/if}
       {#each fields as f, i (f.name)}
         <label>
           <span class="label">{f.label}</span>
           {#if f.multiline}
-            {#if i === 0}
-              <textarea
-                placeholder={f.placeholder ?? ''}
-                bind:value={values[f.name]}
-                bind:this={inputEl}
-                rows="3"
-                spellcheck={false}
-                autocomplete="off"
-              ></textarea>
-            {:else}
-              <textarea
-                placeholder={f.placeholder ?? ''}
-                bind:value={values[f.name]}
-                rows="3"
-                spellcheck={false}
-                autocomplete="off"
-              ></textarea>
-            {/if}
+            <textarea
+              placeholder={f.placeholder ?? ''}
+              bind:value={values[f.name]}
+              use:maybeRef={i}
+              rows="3"
+              spellcheck={false}
+              autocomplete="off"
+            ></textarea>
           {:else}
-            {#if i === 0}
-              <input
-                type="text"
-                placeholder={f.placeholder ?? ''}
-                bind:value={values[f.name]}
-                bind:this={inputEl}
-                spellcheck={false}
-                autocomplete="off"
-              />
-            {:else}
-              <input
-                type="text"
-                placeholder={f.placeholder ?? ''}
-                bind:value={values[f.name]}
-                spellcheck={false}
-                autocomplete="off"
-              />
-            {/if}
+            <input
+              type="text"
+              placeholder={f.placeholder ?? ''}
+              bind:value={values[f.name]}
+              use:maybeRef={i}
+              spellcheck={false}
+              autocomplete="off"
+            />
           {/if}
         </label>
       {/each}
