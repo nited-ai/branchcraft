@@ -5,6 +5,7 @@
   import ContextHelp from './ContextHelp.svelte';
   import type { HelpContent } from './ContextHelp.svelte';
   import DisambigPopup from './DisambigPopup.svelte';
+  import ResetModePopup from './ResetModePopup.svelte';
 
   type Props = {
     commits: LaidOutCommit[];
@@ -56,8 +57,12 @@
   let dragCursor = $state({ x: 0, y: 0 });
   type DropTarget =
     | { kind: 'ref'; refName: string }
-    | { kind: 'worktree'; worktreePath: string };
+    | { kind: 'worktree'; worktreePath: string }
+    | { kind: 'commit'; sha: string };
   let dropTarget = $state<DropTarget | null>(null);
+
+  type ResetPopup = { branch: string; sha: string; x: number; y: number };
+  let resetPopup = $state<ResetPopup | null>(null);
 
   let refKindByName = $derived.by(() => {
     const m = new Map<string, RefKind>();
@@ -496,6 +501,16 @@
         break;
       }
     }
+    // SVG circles aren't HTMLElements — handle them via getAttribute on Element.
+    if (!found) {
+      for (const el of els) {
+        const sha = el instanceof Element ? el.getAttribute('data-drop-commit-sha') : null;
+        if (sha) {
+          found = { kind: 'commit', sha };
+          break;
+        }
+      }
+    }
     dropTarget = found;
   }
 
@@ -547,6 +562,21 @@
       } else {
         assertNever(d);
       }
+    } else if (target.kind === 'commit') {
+      if (d.kind === 'ref') {
+        // PLAN row 5: branch tip dropped on a commit = reset.
+        // Pop the mode popup; reset is destructive enough to warrant the
+        // explicit choice every time.
+        resetPopup = {
+          branch: d.name,
+          sha: target.sha,
+          x: dragCursor.x,
+          y: dragCursor.y,
+        };
+      }
+      // ref tip → commit on a different lane could also be PLAN row 2 (rebase
+      // onto). Same-lane vs different-lane heuristic isn't reliable, so we
+      // only handle the explicit reset case here. Rebase-via-drag is Tier B.
     }
   }
 
@@ -891,6 +921,7 @@
             cy={r.dotY}
             r="10"
             fill="transparent"
+            data-drop-commit-sha={r.commit.sha}
             onpointerdown={(e) => onCommitPointerDown(r.commit, e)}
             onmouseenter={(e) => showHelp(helpForCommit(r.commit), e)}
             onmouseleave={hideHelp}
@@ -1106,6 +1137,21 @@
     onCancel={() => (disambig = null)}
   />
 
+  <ResetModePopup
+    open={resetPopup !== null}
+    branch={resetPopup?.branch ?? ''}
+    sha={resetPopup?.sha ?? ''}
+    x={resetPopup?.x ?? 0}
+    y={resetPopup?.y ?? 0}
+    onChoose={(mode) => {
+      if (resetPopup && onQueueCommand) {
+        onQueueCommand({ kind: 'reset', branch: resetPopup.branch, to: resetPopup.sha, mode });
+      }
+      resetPopup = null;
+    }}
+    onCancel={() => (resetPopup = null)}
+  />
+
   <ContextHelp content={helpContent} x={cursorPos.x} y={cursorPos.y} />
 
   {#if drag}
@@ -1118,7 +1164,7 @@
         <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : 'cherry-pick'}</span>
         <span class="ghost-label">{shortSha(drag.sha)}</span>
       {:else if drag.kind === 'ref'}
-        <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : dropTarget?.kind === 'ref' && refKindByName.get(dropTarget.refName) === 'remote' ? 'push' : 'merge'}</span>
+        <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : dropTarget?.kind === 'commit' ? 'reset' : dropTarget?.kind === 'ref' && refKindByName.get(dropTarget.refName) === 'remote' ? 'push' : 'merge'}</span>
         <span class="ghost-label">{drag.name}</span>
       {:else}
         <span class="kind">checkout</span>
@@ -1129,7 +1175,9 @@
         <span class="ghost-label target">
           {dropTarget.kind === 'ref'
             ? dropTarget.refName
-            : (dropTarget.worktreePath.split(/[/\\]/).filter(Boolean).at(-1) ?? '')}
+            : dropTarget.kind === 'commit'
+              ? shortSha(dropTarget.sha)
+              : (dropTarget.worktreePath.split(/[/\\]/).filter(Boolean).at(-1) ?? '')}
         </span>
       {/if}
     </div>
