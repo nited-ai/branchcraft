@@ -537,7 +537,7 @@
       return {
         kind: 'preview commit',
         title: shortSha(c.sha),
-        body: `Not real yet — this is what your queued commands would create. Hit Apply in the queue panel to actually run them, or remove the command from the queue to undo the preview.`,
+        body: 'A what-if commit — branchcraft computed what would land here if you applied the queued commands. Nothing exists on disk yet. Click Apply in the queue panel to actually create it, or remove the queued command to drop the preview.',
       };
     }
     const branchHint = c.refs.find((r) => r.kind === 'branch' || r.kind === 'head');
@@ -656,7 +656,7 @@
   const FOLD_HELP: HelpContent = {
     kind: 'fold',
     title: 'plain commits',
-    body: 'These commits don’t have any branches, tags, or worktrees pointing at them — there’s nothing on them you can grab from here. They’re collapsed so the graph stays focused on the points where you can actually act.',
+    body: "These commits don't have any branches, tags, or worktrees pointing at them — there's nothing on them you can grab from here. They're collapsed so the graph stays focused on the points where you can actually act.",
     hint: 'Click anyway if you want to see them — e.g. to grab a single commit and cherry-pick it elsewhere.',
   };
 
@@ -664,13 +664,13 @@
     kind: 'fold',
     title: 'background tasks',
     body: 'Hidden sessions started by automation — scheduled tasks, hooks, etc. Not real conversations. Always folded so a worktree with one human chat and 300 health-check fires shows the chat first.',
-    hint: 'Open it if you’re auditing what the scheduler did.',
+    hint: "Open it if you're auditing what the scheduler did.",
   };
 
   const CONVERSATION_FOLD_HELP: HelpContent = {
     kind: 'fold',
     title: 'conversations',
-    body: 'Folded because there are enough sessions here to clutter the card. The number is total — the “live” count is how many were active in the last 2 minutes.',
+    body: 'Folded because there are enough sessions here to clutter the card. The number is total — the "live" count is how many were active in the last 2 minutes.',
     hint: 'Click to see them all.',
   };
 
