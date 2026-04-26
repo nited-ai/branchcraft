@@ -826,10 +826,16 @@
             {#if ref.name}
               {#if ref.kind === 'remote'}
                 {@const split = splitRemoteRef(ref.name)}
+                <!-- Remote refs are drop targets but NOT drag sources, so
+                     no `role`/`onpointerdown`. role="none" satisfies the
+                     a11y rule that mouseenter on an interactive element
+                     needs a role — here the role is genuinely "decorative
+                     marker" and we say so explicitly. -->
                 <span
                   class={`ref ref-${ref.kind}`}
                   class:drop-active={dropTarget?.kind === 'ref' && dropTarget.refName === ref.name && drag !== null}
                   data-drop-ref={onQueueCommand ? ref.name : undefined}
+                  role="none"
                   onmouseenter={(e) => showHelp(helpForRef(ref), e)}
                   onmouseleave={hideHelp}
                 ><span class="remote-prefix">{split.remote}/</span>{split.rest}</span>
