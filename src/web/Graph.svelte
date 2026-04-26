@@ -60,10 +60,26 @@
   // into a single short row showing "▸ N commits".
   let expandedRuns = $state(new Set<string>());
 
-  // Per-worktree expansion state for the session-pill list. Worktrees with
-  // many CCD sessions (esp. background scheduled-task fires) drown the card
-  // otherwise — same fold pattern as commits.
+  // Per-worktree expansion state for the two session-pill groups.
+  // `expandedSessions` controls the user-conversation list (visible above
+  // some threshold). `expandedTasks` controls scheduled-task pills, which
+  // are ALWAYS folded by default — they're machine fires, not chats, and
+  // should never crowd out real conversations.
   let expandedSessions = $state(new Set<string>());
+  let expandedTasks = $state(new Set<string>());
+
+  function partitionSessions(sessions: Session[]): {
+    conversations: Session[];
+    tasks: Session[];
+  } {
+    const conversations: Session[] = [];
+    const tasks: Session[] = [];
+    for (const s of sessions) {
+      if (s.source === 'scheduled-task') tasks.push(s);
+      else conversations.push(s);
+    }
+    return { conversations, tasks };
+  }
 
   function isPlain(c: LaidOutCommit, wts: Worktree[]): boolean {
     if (c.simulated) return false;
@@ -98,13 +114,22 @@
       };
 
   function worktreeBlockHeight(wt: Worktree): number {
-    const n = wt.sessions.length;
-    if (n === 0) return CARD_H + HINT_H;
-    if (n >= SESSION_FOLD_THRESHOLD && !expandedSessions.has(wt.path)) {
-      // One toggle row only — pills hidden.
-      return CARD_H + SESSION_FOLD_H;
+    const { conversations, tasks } = partitionSessions(wt.sessions);
+    let h = CARD_H;
+    if (conversations.length === 0 && tasks.length === 0) {
+      return h + HINT_H;
     }
-    return CARD_H + n * PILL_H + (n >= SESSION_FOLD_THRESHOLD ? SESSION_FOLD_H : 0);
+    if (conversations.length >= SESSION_FOLD_THRESHOLD) {
+      h += SESSION_FOLD_H;
+      if (expandedSessions.has(wt.path)) h += conversations.length * PILL_H;
+    } else {
+      h += conversations.length * PILL_H;
+    }
+    if (tasks.length > 0) {
+      h += SESSION_FOLD_H;
+      if (expandedTasks.has(wt.path)) h += tasks.length * PILL_H;
+    }
+    return h;
   }
 
   function toggleSessions(path: string) {
@@ -112,6 +137,13 @@
     if (next.has(path)) next.delete(path);
     else next.add(path);
     expandedSessions = next;
+  }
+
+  function toggleTasks(path: string) {
+    const next = new Set(expandedTasks);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    expandedTasks = next;
   }
 
   let rows = $derived.by<Row[]>(() => {
@@ -277,7 +309,13 @@
   });
 
   type SessionLayout = { key: string; top: number; session: Session };
-  type SessionFold = { top: number; total: number; live: number; expanded: boolean };
+  type SessionFold = {
+    top: number;
+    total: number;
+    live: number;
+    expanded: boolean;
+    kind: 'conversations' | 'tasks';
+  };
   type CardLayout = {
     key: string;
     worktree: Worktree;
@@ -285,9 +323,13 @@
     dotX: number;
     connectorTop: number;
     connectorHeight: number;
+    /** User + command-source pills, when expanded or below threshold. */
     sessions: SessionLayout[];
+    /** Scheduled-task pills, when expanded. */
+    tasks: SessionLayout[];
     sessionFold: SessionFold | null;
-    /** Top of the "no sessions" stub when worktree.sessions is empty. */
+    tasksFold: SessionFold | null;
+    /** Top of the "no sessions" stub when both groups are empty. */
     hintTop: number | null;
   };
   let cardLayouts = $derived.by<CardLayout[]>(() => {
@@ -299,34 +341,61 @@
       for (const wt of r.worktrees) {
         const cardTop = cursor;
         const afterCard = cardTop + CARD_H;
-        const n = wt.sessions.length;
+        const { conversations, tasks } = partitionSessions(wt.sessions);
 
+        // Y-cursor walking down inside this worktree's block. Each piece
+        // (conversation fold, conversation pills, tasks fold, task pills)
+        // bumps it forward in the same order they render.
+        let y = afterCard;
         let sessionFold: SessionFold | null = null;
-        let pillsTop = afterCard;
         let sessions: SessionLayout[] = [];
 
-        if (n >= SESSION_FOLD_THRESHOLD) {
+        if (conversations.length >= SESSION_FOLD_THRESHOLD) {
           const expanded = expandedSessions.has(wt.path);
           sessionFold = {
-            top: afterCard,
-            total: n,
-            live: wt.sessions.filter((s) => s.isLive).length,
+            top: y,
+            total: conversations.length,
+            live: conversations.filter((s) => s.isLive).length,
             expanded,
+            kind: 'conversations',
           };
-          pillsTop = afterCard + SESSION_FOLD_H;
+          y += SESSION_FOLD_H;
           if (expanded) {
-            sessions = wt.sessions.map((s, i) => ({
+            sessions = conversations.map((s, i) => ({
               key: `${wt.path}|${s.id}`,
-              top: pillsTop + i * PILL_H,
+              top: y + i * PILL_H,
+              session: s,
+            }));
+            y += conversations.length * PILL_H;
+          }
+        } else if (conversations.length > 0) {
+          sessions = conversations.map((s, i) => ({
+            key: `${wt.path}|${s.id}`,
+            top: y + i * PILL_H,
+            session: s,
+          }));
+          y += conversations.length * PILL_H;
+        }
+
+        let tasksFold: SessionFold | null = null;
+        let tasksOut: SessionLayout[] = [];
+        if (tasks.length > 0) {
+          const expanded = expandedTasks.has(wt.path);
+          tasksFold = {
+            top: y,
+            total: tasks.length,
+            live: tasks.filter((s) => s.isLive).length,
+            expanded,
+            kind: 'tasks',
+          };
+          y += SESSION_FOLD_H;
+          if (expanded) {
+            tasksOut = tasks.map((s, i) => ({
+              key: `${wt.path}|${s.id}`,
+              top: y + i * PILL_H,
               session: s,
             }));
           }
-        } else if (n > 0) {
-          sessions = wt.sessions.map((s, i) => ({
-            key: `${wt.path}|${s.id}`,
-            top: pillsTop + i * PILL_H,
-            session: s,
-          }));
         }
 
         out.push({
@@ -337,8 +406,11 @@
           connectorTop: r.dotY,
           connectorHeight: cardTop + CARD_H / 2 - r.dotY,
           sessions,
+          tasks: tasksOut,
           sessionFold,
-          hintTop: n === 0 ? afterCard : null,
+          tasksFold,
+          hintTop:
+            conversations.length === 0 && tasks.length === 0 ? afterCard : null,
         });
         cursor += worktreeBlockHeight(wt);
       }
@@ -565,12 +637,12 @@
           class="session-fold-btn"
           onclick={() => toggleSessions(card.worktree.path)}
           title={card.sessionFold.expanded
-            ? 'Hide sessions'
-            : `Show ${card.sessionFold.total} sessions`}
+            ? 'Hide conversations'
+            : `Show ${card.sessionFold.total} conversations`}
         >
           <span class="chev mono" aria-hidden="true">{card.sessionFold.expanded ? '▾' : '▸'}</span>
           <span class="count mono">{card.sessionFold.total}</span>
-          <span class="lbl">sessions</span>
+          <span class="lbl">conversations</span>
           {#if card.sessionFold.live > 0}
             <span class="live-dot" aria-hidden="true"></span>
             <span class="live-count mono">{card.sessionFold.live} live</span>
@@ -580,6 +652,26 @@
     {/if}
     {#each card.sessions as s (s.key)}
       <div class="session-row" style="top: {s.top}px;">
+        <SessionPill session={s.session} />
+      </div>
+    {/each}
+    {#if card.tasksFold}
+      <div class="session-fold session-fold-tasks" style="top: {card.tasksFold.top}px;">
+        <button
+          class="session-fold-btn task-fold-btn"
+          onclick={() => toggleTasks(card.worktree.path)}
+          title={card.tasksFold.expanded
+            ? 'Hide background tasks'
+            : `Show ${card.tasksFold.total} background tasks (scheduled / automated, not chats)`}
+        >
+          <span class="chev mono" aria-hidden="true">{card.tasksFold.expanded ? '▾' : '▸'}</span>
+          <span class="count mono">{card.tasksFold.total}</span>
+          <span class="lbl">background tasks</span>
+        </button>
+      </div>
+    {/if}
+    {#each card.tasks as s (s.key)}
+      <div class="session-row session-row-task" style="top: {s.top}px;">
         <SessionPill session={s.session} />
       </div>
     {/each}
@@ -889,6 +981,35 @@
   .session-fold-btn .live-count {
     color: var(--success);
     font-size: 10px;
+  }
+
+  /*
+   * Background-task fold + pills get a flatter, dimmer treatment so they
+   * don't compete visually with real conversations. Same fold mechanic,
+   * but the user knows at a glance "this is machine noise, not a chat".
+   */
+  .task-fold-btn {
+    border-style: dashed;
+    border-color: var(--hairline);
+  }
+
+  .task-fold-btn .lbl {
+    color: var(--text-secondary);
+  }
+
+  .task-fold-btn .count {
+    color: var(--text-secondary);
+  }
+
+  .session-row-task :global(.pill) {
+    opacity: 0.6;
+    background: transparent;
+  }
+
+  .session-row-task :global(.pill .badge) {
+    background: rgba(138, 150, 168, 0.12);
+    border-color: rgba(138, 150, 168, 0.3);
+    color: var(--branch-7);
   }
 
   .drag-ghost {
