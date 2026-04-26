@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Command, LaidOutCommit, RefDecoration, RefKind, Session, Worktree } from '../shared/types.ts';
+  import type { ActivityEvent, Command, LaidOutCommit, RefDecoration, RefKind, Session, Worktree } from '../shared/types.ts';
   import WorktreeCard from './WorktreeCard.svelte';
   import SessionPill from './SessionPill.svelte';
   import ContextHelp from './ContextHelp.svelte';
@@ -20,9 +20,11 @@
       danger?: boolean;
       onApply: (values: Record<string, string>) => void;
     }) => void;
+    recentActivity: Map<string, ActivityEvent>;
+    conflictFiles: Set<string>;
   };
 
-  let { commits, laneCount, worktrees, onQueueCommand, onOpenApplyModal }: Props = $props();
+  let { commits, laneCount, worktrees, onQueueCommand, onOpenApplyModal, recentActivity, conflictFiles }: Props = $props();
 
   // ── Hover help overlay ────────────────────────────────────────────────────
   // Cursor-tracking floating panel that explains what each interactive
@@ -1074,6 +1076,8 @@
       </div>
     {/if}
     {#each card.sessions as s (s.key)}
+      {@const a = recentActivity.get(s.session.id)}
+      {@const ageSec = a ? Math.floor((Date.now() - a.ts) / 1000) : 0}
       <div
         class="session-row"
         style="top: {s.top}px;"
@@ -1081,7 +1085,11 @@
         onmouseleave={hideHelp}
         role="presentation"
       >
-        <SessionPill session={s.session} />
+        {#if a && a.file}
+          <SessionPill session={s.session} activity={{ file: a.file, ageSec, hasConflict: conflictFiles.has(a.file) }} />
+        {:else}
+          <SessionPill session={s.session} />
+        {/if}
       </div>
     {/each}
     {#if card.tasksFold}
@@ -1102,6 +1110,8 @@
       </div>
     {/if}
     {#each card.tasks as s (s.key)}
+      {@const a = recentActivity.get(s.session.id)}
+      {@const ageSec = a ? Math.floor((Date.now() - a.ts) / 1000) : 0}
       <div
         class="session-row session-row-task"
         style="top: {s.top}px;"
@@ -1109,7 +1119,11 @@
         onmouseleave={hideHelp}
         role="presentation"
       >
-        <SessionPill session={s.session} />
+        {#if a && a.file}
+          <SessionPill session={s.session} activity={{ file: a.file, ageSec, hasConflict: conflictFiles.has(a.file) }} />
+        {:else}
+          <SessionPill session={s.session} />
+        {/if}
       </div>
     {/each}
   {/each}

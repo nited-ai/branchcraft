@@ -113,3 +113,14 @@ a:hover {
     outline-offset: 2px;
   }
 }
+
+@keyframes warn-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(212, 165, 74, 0);
+    border-color: rgba(212, 165, 74, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(212, 165, 74, 0.18);
+    border-color: var(--warning);
+  }
+}

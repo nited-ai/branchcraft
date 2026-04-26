@@ -118,6 +118,16 @@
     return `${left} 1fr ${right}`;
   });
 
+  let recentActivity = $derived.by(() => {
+    const m = new Map<string, ActivityEvent>();
+    // events are newest first; first hit per session is most recent
+    for (const e of activityEvents) {
+      if (!m.has(e.sessionId)) m.set(e.sessionId, e);
+    }
+    return m;
+  });
+  let conflictFiles = $derived(new Set(concurrentByFile.keys()));
+
   let branchSuggestions = $derived.by(() => {
     const set = new Set<string>();
     for (const c of baseCommits.length ? baseCommits : graphCommits) {
@@ -454,6 +464,8 @@
           {worktrees}
           onQueueCommand={queueCommand}
           onOpenApplyModal={openApplyModal}
+          recentActivity={recentActivity}
+          conflictFiles={conflictFiles}
         />
       {/if}
     </section>

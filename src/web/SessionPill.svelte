@@ -1,8 +1,13 @@
 <script lang="ts">
   import type { Session, SessionProviderId } from '../shared/types.ts';
 
-  type Props = { session: Session };
-  let { session }: Props = $props();
+  type ActivityHint = {
+    file?: string;
+    ageSec: number;
+    hasConflict: boolean;
+  };
+  type Props = { session: Session; activity?: ActivityHint };
+  let { session, activity }: Props = $props();
 
   const PROVIDER_BADGE: Record<SessionProviderId, string> = {
     'claude-code': 'CC',
@@ -20,16 +25,29 @@
     return `${Math.floor(sec / 86400)}d`;
   }
 
+  function basename(p: string): string {
+    return p.split(/[/\\]/).filter(Boolean).at(-1) ?? p;
+  }
+
   let badge = $derived(PROVIDER_BADGE[session.provider] ?? '??');
   let shortId = $derived(session.id.slice(0, 6));
   let ageLabel = $derived(age(session.lastActivity));
 </script>
 
-<div class="pill" class:live={session.isLive} data-session-id={session.id} title={session.title}>
+<div
+  class="pill"
+  class:live={session.isLive}
+  class:warn={activity?.hasConflict}
+  data-session-id={session.id}
+  title={session.title}
+>
   <span class={`dot ${session.isLive ? 'dot-live' : 'dot-idle'}`} aria-hidden="true"></span>
   <span class="badge mono">{badge}</span>
   <span class="sid mono">{shortId}</span>
   <span class="title">{session.title}</span>
+  {#if activity?.file}
+    <span class="now mono">✎ {basename(activity.file)}</span>
+  {/if}
   <span class="age mono">{ageLabel}</span>
 </div>
 
@@ -101,5 +119,28 @@
     color: var(--text-secondary);
     font-size: 10px;
     flex-shrink: 0;
+  }
+
+  .pill .now {
+    font-size: 10px;
+    color: var(--branch-2);
+    margin-left: var(--s2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 12ch;
+  }
+
+  .pill.warn {
+    animation: warn-pulse 2s ease-in-out infinite;
+    border-color: var(--warning);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pill.warn {
+      animation: none;
+      border-color: var(--warning);
+      background: rgba(212, 165, 74, 0.08);
+    }
   }
 </style>
