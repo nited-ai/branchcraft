@@ -413,6 +413,7 @@
           {laneCount}
           {worktrees}
           onQueueCommand={queueCommand}
+          onOpenApplyModal={openApplyModal}
         />
       {/if}
     </section>

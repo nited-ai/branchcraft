@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Command, LaidOutCommit, RefDecoration, Session, Worktree } from '../shared/types.ts';
+  import type { Command, LaidOutCommit, RefDecoration, RefKind, Session, Worktree } from '../shared/types.ts';
   import WorktreeCard from './WorktreeCard.svelte';
   import SessionPill from './SessionPill.svelte';
   import ContextHelp from './ContextHelp.svelte';
@@ -11,9 +11,17 @@
     laneCount: number;
     worktrees: Worktree[];
     onQueueCommand?: (cmd: Command) => void;
+    onOpenApplyModal?: (s: {
+      title: string;
+      intro?: string;
+      fields: { name: string; label: string; placeholder?: string; multiline?: boolean; required?: boolean; initial?: string }[];
+      confirmLabel?: string;
+      danger?: boolean;
+      onApply: (values: Record<string, string>) => void;
+    }) => void;
   };
 
-  let { commits, laneCount, worktrees, onQueueCommand }: Props = $props();
+  let { commits, laneCount, worktrees, onQueueCommand, onOpenApplyModal }: Props = $props();
 
   // ── Hover help overlay ────────────────────────────────────────────────────
   // Cursor-tracking floating panel that explains what each interactive
@@ -50,6 +58,16 @@
     | { kind: 'ref'; refName: string }
     | { kind: 'worktree'; worktreePath: string };
   let dropTarget = $state<DropTarget | null>(null);
+
+  let refKindByName = $derived.by(() => {
+    const m = new Map<string, RefKind>();
+    for (const c of commits) {
+      for (const r of c.refs) {
+        if (r.name) m.set(r.name, r.kind);
+      }
+    }
+    return m;
+  });
 
   type PendingDisambig = {
     fromName: string;
@@ -499,9 +517,16 @@
         });
       } else if (d.kind === 'ref') {
         if (d.name === target.refName) return;
-        // Per PLAN.md §4.4, ask whether to merge / rebase / squash. Pop the
-        // disambig popup at the cursor; we resolve to a queued command in the
-        // popup's onChoose callback.
+        const targetKind = refKindByName.get(target.refName);
+        const sourceKind = refKindByName.get(d.name);
+        // Local branch (or current HEAD) → remote ref of the same logical name
+        // = push. e.g. drag `main` onto `origin/main`. PLAN.md §4.2 row 7.
+        if (targetKind === 'remote' && sourceKind !== 'remote') {
+          const remote = target.refName.split('/')[0] ?? 'origin';
+          maybePromptForceAndQueuePush(d.name, remote, target.refName);
+          return;
+        }
+        // Otherwise: branch → branch disambig popup (rebase/merge/squash).
         disambig = {
           fromName: d.name,
           intoName: target.refName,
@@ -523,6 +548,77 @@
         assertNever(d);
       }
     }
+  }
+
+  function maybePromptForceAndQueuePush(branch: string, remote: string, remoteRef: string) {
+    if (!onQueueCommand) return;
+
+    // Find the local branch's tip and the remote's tip in the current commit list.
+    let branchSha: string | null = null;
+    let remoteSha: string | null = null;
+    for (const c of commits) {
+      for (const r of c.refs) {
+        if (r.name === branch && (r.kind === 'branch' || r.kind === 'head')) branchSha = c.sha;
+        if (r.name === remoteRef && r.kind === 'remote') remoteSha = c.sha;
+      }
+    }
+
+    // Naive ancestry walk via first-parents: cheap and good enough for the
+    // lease-prompt heuristic. Real ancestry is verified server-side by
+    // git push itself; we just decide whether to ask for force here.
+    function isAncestorViaFirstParents(start: string | null, target: string | null): boolean {
+      if (!start || !target) return false;
+      if (start === target) return true;
+      const byShasMap = new Map(commits.map((c) => [c.sha, c] as const));
+      let cur: string | undefined = start;
+      const seen = new Set<string>();
+      while (cur && !seen.has(cur)) {
+        seen.add(cur);
+        if (cur === target) return true;
+        const c = byShasMap.get(cur);
+        if (!c) return false;
+        cur = c.parents[0];
+      }
+      return false;
+    }
+
+    // If remote is an ancestor of local (i.e. local is ahead of remote),
+    // a normal push works. Otherwise history has diverged -- ask the user.
+    const ff = isAncestorViaFirstParents(branchSha, remoteSha);
+    if (ff) {
+      onQueueCommand({ kind: 'push', branch, remote });
+      return;
+    }
+    if (!onOpenApplyModal) {
+      // No modal host -- fall back to lease push. Safer than --force.
+      onQueueCommand({ kind: 'push', branch, remote, force: 'lease' });
+      return;
+    }
+    onOpenApplyModal({
+      title: `Push ${branch} -> ${remoteRef}`,
+      intro: `${remoteRef} has commits that aren't in your local ${branch}. A regular push would be rejected.\n\n- Force-with-lease: overwrites the remote ONLY if it hasn't moved since your last fetch. Recommended.\n- Force: overwrites unconditionally. Dangerous on shared branches.\n- Cancel and pull first.`,
+      fields: [
+        {
+          name: 'mode',
+          label: 'Mode',
+          placeholder: 'lease (default), force, or cancel',
+          required: true,
+          initial: 'lease',
+        },
+      ],
+      confirmLabel: 'Queue push',
+      danger: true,
+      onApply: (values) => {
+        const mode = (values['mode'] ?? '').trim().toLowerCase();
+        if (mode === 'force') {
+          onQueueCommand!({ kind: 'push', branch, remote, force: true });
+        } else if (mode === 'cancel') {
+          // no-op -- user picked cancel
+        } else {
+          onQueueCommand!({ kind: 'push', branch, remote, force: 'lease' });
+        }
+      },
+    });
   }
 
   function onCommitPointerDown(c: LaidOutCommit, e: PointerEvent) {
@@ -1022,7 +1118,7 @@
         <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : 'cherry-pick'}</span>
         <span class="ghost-label">{shortSha(drag.sha)}</span>
       {:else if drag.kind === 'ref'}
-        <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : 'merge'}</span>
+        <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : dropTarget?.kind === 'ref' && refKindByName.get(dropTarget.refName) === 'remote' ? 'push' : 'merge'}</span>
         <span class="ghost-label">{drag.name}</span>
       {:else}
         <span class="kind">checkout</span>
