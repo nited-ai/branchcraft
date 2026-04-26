@@ -59,6 +59,12 @@
     background: var(--bg-elevated);
     font-size: 12px;
     white-space: nowrap;
+    cursor: grab;
+    user-select: none;
+  }
+
+  .card:active {
+    cursor: grabbing;
   }
 
   .card.stale {

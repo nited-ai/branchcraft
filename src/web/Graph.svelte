@@ -41,6 +41,7 @@
   type Drag =
     | { kind: 'commit'; sha: string; subject: string }
     | { kind: 'ref'; name: string }
+    | { kind: 'worktree'; path: string; branch: string | null }
     | null;
   let drag = $state<Drag>(null);
   let dragCursor = $state({ x: 0, y: 0 });
@@ -496,17 +497,17 @@
           into: target.refName,
           ff: 'auto',
         });
+      } else if (d.kind === 'worktree') {
+        // Drag-from-worktree onto a ref pill = check that worktree out at the ref.
+        onQueueCommand({ kind: 'checkout', worktree: d.path, target: target.refName });
       }
     } else if (target.kind === 'worktree') {
-      // Drop on a worktree card → checkout that target into that worktree.
-      // Works for both commit dots (detached checkout) and branch refs
-      // (branch checkout). Source is whatever the user grabbed.
-      const targetSpec = d.kind === 'commit' ? d.sha : d.name;
-      onQueueCommand({
-        kind: 'checkout',
-        worktree: target.worktreePath,
-        target: targetSpec,
-      });
+      if (d.kind === 'commit') {
+        onQueueCommand({ kind: 'checkout', worktree: target.worktreePath, target: d.sha });
+      } else if (d.kind === 'ref') {
+        onQueueCommand({ kind: 'checkout', worktree: target.worktreePath, target: d.name });
+      }
+      // worktree → worktree drop is meaningless — silently ignore.
     }
   }
 
@@ -518,6 +519,14 @@
   function onRefPointerDown(name: string, e: PointerEvent) {
     if (e.button !== 0) return;
     startDrag({ kind: 'ref', name }, e);
+  }
+
+  function onWorktreePointerDown(wt: Worktree, e: PointerEvent) {
+    if (e.button !== 0) return;
+    // Cards are also drop targets — only start a drag when the cursor is
+    // actually on the card itself, not on something inside that bubbled up.
+    if (!(e.currentTarget instanceof HTMLElement)) return;
+    startDrag({ kind: 'worktree', path: wt.path, branch: wt.branch }, e);
   }
 
   // ── Help-content builders ────────────────────────────────────────────────
@@ -855,6 +864,7 @@
       class:drop-active={dropTarget?.kind === 'worktree' && dropTarget.worktreePath === card.worktree.path && drag !== null}
       style="top: {card.top}px;"
       data-drop-worktree={onQueueCommand ? card.worktree.path : undefined}
+      onpointerdown={onQueueCommand ? (e) => onWorktreePointerDown(card.worktree, e) : undefined}
       onmouseenter={(e) => showHelp(helpForWorktree(card.worktree), e)}
       onmouseleave={hideHelp}
       role="presentation"
@@ -940,9 +950,12 @@
       {#if drag.kind === 'commit'}
         <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : 'cherry-pick'}</span>
         <span class="ghost-label">{shortSha(drag.sha)}</span>
-      {:else}
+      {:else if drag.kind === 'ref'}
         <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : 'merge'}</span>
         <span class="ghost-label">{drag.name}</span>
+      {:else}
+        <span class="kind">checkout</span>
+        <span class="ghost-label">{drag.path.split(/[/\\]/).filter(Boolean).at(-1) ?? drag.path}</span>
       {/if}
       {#if dropTarget}
         <span class="arrow">→</span>
