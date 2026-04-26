@@ -15,6 +15,7 @@ import {
 } from './git/simulate.ts';
 import { applyCommands } from './git/apply.ts';
 import { listReflog, listStash, listTags } from './git/rucksacks.ts';
+import { getOrCreateActivityManager } from './activity/index.ts';
 import {
   addRepo as cfgAddRepo,
   findRepoById,
@@ -262,6 +263,69 @@ app.get('/api/repos/:id/rucksacks', async (c) => {
   ]);
   const body: ApiRucksacks = { stash, tags, reflog };
   return c.json(body);
+});
+
+app.get('/api/repos/:id/activity', async (c) => {
+  const repo = findRepoById(c.req.param('id'));
+  if (!repo) return c.json({ error: 'repo_not_found' }, 404);
+  if (!(await isGitRepo(repo.path))) {
+    return c.json({ error: 'not_a_git_repo', path: repo.path }, 400);
+  }
+  const worktrees = await listWorktrees(repo.path);
+  const mgr = getOrCreateActivityManager({
+    repoId: repo.id,
+    worktreePaths: worktrees.map((w) => w.path),
+  });
+  return c.json(mgr.snapshot());
+});
+
+app.get('/api/repos/:id/activity/stream', async (c) => {
+  const repo = findRepoById(c.req.param('id'));
+  if (!repo) return c.json({ error: 'repo_not_found' }, 404);
+  if (!(await isGitRepo(repo.path))) {
+    return c.json({ error: 'not_a_git_repo', path: repo.path }, 400);
+  }
+  const worktrees = await listWorktrees(repo.path);
+  const mgr = getOrCreateActivityManager({
+    repoId: repo.id,
+    worktreePaths: worktrees.map((w) => w.path),
+  });
+
+  const heartbeatSec = Number(process.env.BRANCHCRAFT_SSE_HEARTBEAT_SEC ?? 20);
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const enc = new TextEncoder();
+      const send = (event: string, data: unknown) => {
+        controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      };
+      send('snapshot', mgr.snapshot());
+      const unsub = mgr.bus.subscribe(repo.id, (msg) => {
+        if (msg.kind === 'event') send('activity', msg.event);
+        else if (msg.kind === 'conflict') send('conflict', msg.conflict);
+        else if (msg.kind === 'snapshot') send('snapshot', msg.snapshot);
+      });
+      const hb = setInterval(() => send('heartbeat', { ts: Date.now() }), heartbeatSec * 1000);
+      // Hono closes the stream when the request is aborted; clean up here.
+      const close = () => {
+        clearInterval(hb);
+        unsub();
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      };
+      c.req.raw.signal.addEventListener('abort', close);
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-store',
+      connection: 'keep-alive',
+    },
+  });
 });
 
 app.post('/api/repos/:id/apply', async (c) => {
