@@ -17,6 +17,7 @@
   import Rucksacks from './Rucksacks.svelte';
   import Coachmark from './Coachmark.svelte';
   import Legend from './Legend.svelte';
+  import ApplyModal from './ApplyModal.svelte';
   import type {
     ApiRucksacks,
     ApplyResult,
@@ -37,6 +38,24 @@
   let theme = $state<Theme>('dark');
   let modalOpen = $state(false);
   let cmdFormOpen = $state(false);
+
+  type ApplyModalState = {
+    title: string;
+    intro?: string;
+    fields: { name: string; label: string; placeholder?: string; multiline?: boolean; required?: boolean; initial?: string }[];
+    confirmLabel?: string;
+    danger?: boolean;
+    onApply: (values: Record<string, string>) => void;
+  };
+
+  let applyModal = $state<ApplyModalState | null>(null);
+
+  function openApplyModal(s: ApplyModalState) {
+    applyModal = s;
+  }
+  function closeApplyModal() {
+    applyModal = null;
+  }
 
   // Simulator queue + preview state.
   let queue = $state<Command[]>([]);
@@ -436,6 +455,22 @@
 />
 
 <Coachmark storageKey="branchcraft.coachmark.dismissed" />
+
+{#if applyModal}
+  <ApplyModal
+    open={true}
+    title={applyModal.title}
+    {...applyModal.intro ? { intro: applyModal.intro } : {}}
+    fields={applyModal.fields}
+    confirmLabel={applyModal.confirmLabel ?? 'Apply'}
+    danger={applyModal.danger ?? false}
+    onApply={(values) => {
+      applyModal!.onApply(values);
+      closeApplyModal();
+    }}
+    onCancel={closeApplyModal}
+  />
+{/if}
 
 <style>
   .layout {
