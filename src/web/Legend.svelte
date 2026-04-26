@@ -83,7 +83,7 @@
     <span>merge commit</span>
   </span>
 
-  <span class="item" title="Worktree is N commits behind upstream">
+  <span class="item" title="Worktree is behind its upstream — pull or rebase to catch up">
     <span class="legend-stale" aria-hidden="true"></span>
     <span>stale worktree</span>
   </span>
