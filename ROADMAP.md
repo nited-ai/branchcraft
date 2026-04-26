@@ -1,77 +1,57 @@
 # branchcraft — roadmap & gap analysis
 
 PLAN.md is the design source of truth. This file is the brutally honest
-gap analysis as of `adcad20`: what PLAN promised vs. what the codebase
-actually does, organised by priority. Items move out of this file (and
-into PLAN.md updates / commits) as they ship.
+gap analysis: what PLAN promised vs. what the codebase actually does,
+organised by priority. Items move out of this file (and into PLAN.md
+updates / commits) as they ship.
 
-The big picture: the plumbing (graph layout, simulator, queue, apply,
-session providers, multi-repo hub) is there. The user-visible **drag
-surface is 1.5/19 of PLAN §4.2** and several visual states (stale
-outline, preview commits, fold meaning) are silently rendered without
-anywhere telling the user what they mean. Fixing that is the next
-focus.
+**Pass 1 closed** (`08f4717`): worktree drag source, stale-outline
+explanation, local vs remote ref distinction, hover-help audit,
+disambig popup §4.4, apply modal §4.5, push gesture (row 7), reset
+gesture (row 5), real squash-merge command. Drag surface now 5/19.
 
 ## Drag-gesture audit (PLAN.md §4.2)
 
 | #  | Source → Target                          | Inferred command          | Status |
 |----|------------------------------------------|---------------------------|--------|
-| 1  | branch tip → branch tip                  | merge / rebase / squash   | ⚠ always merges; no disambig popup |
-| 2  | branch tip → commit on another branch    | rebase A onto `<commit>`  | ❌ commits aren't drop targets |
+| 1  | branch tip → branch tip                  | merge / rebase / squash   | ✅ disambig popup, all three options dispatch real commands (squash-merge is its own Command kind) |
+| 2  | branch tip → commit on another branch    | rebase A onto `<commit>`  | ❌ Tier B (commits ARE drop targets now via A8, but only the same-lane / reset case is wired) |
 | 3  | single commit → branch tip               | cherry-pick               | ✅ |
 | 4  | multi-selected commits → branch tip      | cherry-pick in order      | ❌ no multi-select |
-| 5  | branch tip → backward on own line        | reset (mode popup)        | ❌ |
-| 6  | branch tip → forward on own line         | merge `--ff-only`         | ❌ |
-| 7  | local branch → `origin/X` marker         | push (lease if diverged)  | ❌ remote refs aren't drop targets |
-| 8  | `origin/X` marker → local branch         | pull / fetch+merge/rebase | ❌ remote refs aren't drag sources |
-| 9  | worktree card → branch tip               | `git -C <wt> checkout`    | ❌ implemented in REVERSE direction (drop on worktree) — user expected the canonical direction |
-| 10 | branch / worktree → 🎒 stash             | `git stash push`          | ❌ rucksacks aren't drop targets |
-| 11 | stash entry → worktree                   | `git stash pop` (or apply)| ❌ stash entries aren't drag sources |
-| 12 | tag handle → commit                      | create tag                | ❌ no tag handle |
-| 13 | tag in graph → 🏷 trash                  | delete tag                | ❌ no trash zone |
-| 14 | reflog entry → branch tip                | `reset --hard <reflog>`   | ❌ reflog entries aren't drag sources |
-| 15 | commit → ⏪ trash zone                    | revert / reset            | ❌ no trash zone |
-| 16 | commit reordered within own branch line  | rebase -i: reorder        | ❌ |
-| 17 | commit onto another commit (same branch) | rebase -i: squash         | ❌ |
-| 18 | commit → ⏪ trash                         | rebase -i: drop           | ❌ |
+| 5  | branch tip → backward on own line        | reset (mode popup)        | ✅ ResetModePopup with mixed/soft/hard, hard danger-styled |
+| 6  | branch tip → forward on own line         | merge `--ff-only`         | ❌ Tier B |
+| 7  | local branch → `origin/X` marker         | push (lease if diverged)  | ✅ FF case auto-queues, diverged case prompts via apply-modal for lease/force/cancel |
+| 8  | `origin/X` marker → local branch         | pull / fetch+merge/rebase | ❌ Tier B |
+| 9  | worktree card → branch tip               | `git -C <wt> checkout`    | ✅ both directions (drag-from + drop-on) |
+| 10 | branch / worktree → 🎒 stash             | `git stash push`          | ❌ Tier C |
+| 11 | stash entry → worktree                   | `git stash pop` (or apply)| ❌ Tier C |
+| 12 | tag handle → commit                      | create tag                | ❌ Tier C |
+| 13 | tag in graph → 🏷 trash                  | delete tag                | ❌ Tier C |
+| 14 | reflog entry → branch tip                | `reset --hard <reflog>`   | ❌ Tier C |
+| 15 | commit → ⏪ trash zone                    | revert / reset            | ❌ Tier C |
+| 16 | commit reordered within own branch line  | rebase -i: reorder        | ❌ Tier D |
+| 17 | commit onto another commit (same branch) | rebase -i: squash         | ❌ Tier D |
+| 18 | commit → ⏪ trash                         | rebase -i: drop           | ❌ Tier D |
 | 19 | repo from hub sidebar → workspace        | switch repo               | ⚠ click works, drag doesn't |
 
-**Score: 1 fully implemented (3), 1 partial (1), 1 inverted (9), 16 missing.**
+**Score (post-Pass-1): 5 fully (1, 3, 5, 7, 9), 1 partial (19), 13 missing.**
 
-## P0 — broken / confusing UX (must fix before adding more features)
+## P0 — Pass 1 close-out
 
-### a) Worktree cards aren't drag sources
-PLAN §4.2 row 9: drag a worktree onto a branch tip → checkout. Currently
-the card is only a drop target. Users who expect to grab the worktree
-and drop it on a branch fail silently.
+All P0 items shipped:
 
-**Fix:** add `pointerdown` to `.card-row` that starts a worktree-drag.
-On drop on a ref pill, queue a `checkout`. Keep the inverted direction
-(branch → card) too — both work without conflict.
+- a) **Worktree cards as drag sources** — SHIPPED in Pass 1 (`feat(drag): worktree card is a drag source` 4d592b2 + follow-ups).
+- b) **Stale outline + merge in legend** — SHIPPED. `helpForWorktree` mentions the dashed amber border when behind > 0; legend has both stale and merge markers.
+- c) **Local vs remote ref distinction** — SHIPPED. Remote pills now render with a slate `o/` prefix chip + faint slate-tinted background, role="none" for a11y.
+- d) **Hover-help audit** — SHIPPED. The four fold/preview help strings rewritten to teach git concepts, not describe renderer state.
+- e) **Sessions sort labelled** — STILL OPEN. Moves to Pass 2.
 
-### b) Visual states are silently rendered, never explained
-- **Stale outline** (dashed amber border on a worktree card) =
-  "behind upstream by N". Legend doesn't show it. Hover help on the
-  card doesn't mention it.
-- **Preview commit** (dashed outline, half saturation) is in the
-  legend but not labelled "what's queued". On hover it says "preview
-  commit" — the user has to infer the rest.
-- **Merge commit** (hollow circle) isn't in the legend at all.
+Plus the auxiliary UI (prerequisites for richer drags):
 
-**Fix:** add legend entries for stale + merge. Worktree-card hover
-help mentions the dashed outline explicitly when behind > 0.
+- §4.4 **Disambig popup** — SHIPPED. Branch→branch drag opens it; rebase / merge / squash-merge pick the right Command.
+- §4.5 **Apply modal** — SHIPPED as a generic component. Used by the push gesture today; tag/stash/squash-merge text inputs land when those flows ship.
 
-### c) Local vs remote branch refs blur together
-In a busy repo (SentryCall, ~6 lanes, ~10 ref pills per HEAD commit) the
-local-branch pill (solid border) is visually similar to the remote pill
-(dashed border). With many `origin/feat/sen-…/` style names the user
-struggles to spot what's draggable.
-
-**Fix options (pick one):**
-- Different background colour for remote refs (slate vs amber).
-- Compact remote prefix: collapse `origin/` into a tiny `o/` chip.
-- Group remote refs into a single "remotes…" expander when there are
-  more than two.
+Plus the squash-merge command itself was promoted from a `merge ff:'no'` stand-in to a real `kind: 'squash-merge'` Command (simulate.ts, apply.ts, queue.ts, types.ts, simulate.test.ts +3 cases).
 
 ### d) Hover help text still describes "what we did", not "what this is"
 Most cases were rewritten in `adcad20`, but a few stragglers remain
