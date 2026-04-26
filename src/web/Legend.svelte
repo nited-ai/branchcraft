@@ -68,6 +68,25 @@
     <span class="task-marker mono">[scheduled]</span>
     <span class="dim">background task</span>
   </span>
+
+  <span class="item">
+    <svg width="14" height="14" aria-hidden="true">
+      <circle
+        cx="7"
+        cy="7"
+        r="4"
+        fill="var(--bg)"
+        stroke="var(--branch-0)"
+        stroke-width="1.5"
+      />
+    </svg>
+    <span>merge commit</span>
+  </span>
+
+  <span class="item" title="Worktree is N commits behind upstream">
+    <span class="legend-stale" aria-hidden="true"></span>
+    <span>stale worktree</span>
+  </span>
 </div>
 
 <style>
@@ -144,5 +163,14 @@
     border-radius: 2px;
     padding: 0 5px;
     font-size: 10px;
+  }
+
+  .legend-stale {
+    display: inline-block;
+    width: 32px;
+    height: 14px;
+    border: 1px dashed var(--warning);
+    border-radius: 3px;
+    background: rgba(212, 165, 74, 0.06);
   }
 </style>

@@ -629,13 +629,17 @@
     parts.push(dirty === 0 ? 'clean' : `${dirty} unstaged file${dirty === 1 ? '' : 's'}`);
     if (behind > 0) parts.push(`${behind} commit${behind === 1 ? '' : 's'} behind ${wt.status?.upstream ?? 'upstream'}`);
     if (ahead > 0) parts.push(`${ahead} ahead`);
+    const stale =
+      behind > 0
+        ? ` The dashed amber border means this worktree is behind its upstream — pull or rebase to catch up.`
+        : '';
     return {
       kind: 'worktree',
       title: wt.path,
-      body: `A checkout of this repo at ${wt.path}, currently on ${wt.branch ?? '(detached HEAD)'} (${parts.join(', ')}). Each worktree can be on a different branch — that’s how you run several AI agents in parallel without them stepping on each other.`,
+      body: `A checkout of this repo at ${wt.path}, currently on ${wt.branch ?? '(detached HEAD)'} (${parts.join(', ')}). Each worktree can be on a different branch — that's how you run several AI agents in parallel without them stepping on each other.${stale}`,
       ...(onQueueCommand
         ? {
-            hint: 'Drop a branch label here to switch this worktree to that branch. Drop a commit dot to check this worktree out at that exact commit (detached HEAD).',
+            hint: 'Drag the card onto a branch label to switch this worktree to that branch. Or drop a commit / branch label onto the card for the same result from the other direction.',
           }
         : {}),
     };
