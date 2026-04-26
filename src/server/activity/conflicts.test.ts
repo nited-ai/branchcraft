@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectConcurrent } from './conflicts.ts';
+import { detectConcurrent, detectDivergence } from './conflicts.ts';
 import { ActivityStore } from './store.ts';
 import type { ActivityEvent } from '../../shared/types.ts';
 
@@ -60,5 +60,48 @@ describe('detectConcurrent (C1)', () => {
     s.add(c3);
     const c = detectConcurrent(s, c3, { windowMs: 5 * 60_000, now: 3 });
     expect(c?.sessions.map((x) => x.sessionId).sort()).toEqual(['A', 'B', 'C']);
+  });
+});
+
+describe('detectDivergence (C3)', () => {
+  it('returns no divergence when all branches share zero files since base', () => {
+    const branches = new Map<string, Set<string>>([
+      ['main', new Set()],
+      ['feat/a', new Set()],
+    ]);
+    expect(detectDivergence(branches)).toEqual([]);
+  });
+
+  it('emits divergence for two branches that share one file', () => {
+    const branches = new Map<string, Set<string>>([
+      ['feat/a', new Set(['src/foo.ts'])],
+      ['feat/b', new Set(['src/foo.ts'])],
+    ]);
+    const out = detectDivergence(branches);
+    expect(out).toHaveLength(2);
+    const a = out.find((d) => d.branch === 'feat/a')!;
+    expect(a.siblings).toEqual(['feat/b']);
+    expect(a.overlap).toEqual(['src/foo.ts']);
+  });
+
+  it('caps overlap to 20 file paths', () => {
+    const files = new Set<string>();
+    for (let i = 0; i < 50; i++) files.add(`src/${i}.ts`);
+    const branches = new Map<string, Set<string>>([
+      ['a', files],
+      ['b', files],
+    ]);
+    const out = detectDivergence(branches);
+    expect(out[0]?.overlap.length).toBe(20);
+  });
+
+  it('lists multiple siblings for a branch with multiple overlaps', () => {
+    const branches = new Map<string, Set<string>>([
+      ['a', new Set(['x.ts'])],
+      ['b', new Set(['x.ts'])],
+      ['c', new Set(['x.ts'])],
+    ]);
+    const a = detectDivergence(branches).find((d) => d.branch === 'a')!;
+    expect(a.siblings.sort()).toEqual(['b', 'c']);
   });
 });
