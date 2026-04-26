@@ -838,7 +838,7 @@
                   role="none"
                   onmouseenter={(e) => showHelp(helpForRef(ref), e)}
                   onmouseleave={hideHelp}
-                ><span class="remote-prefix">{split.remote}/</span>{split.rest}</span>
+                >{#if split.remote}<span class="remote-prefix">{split.remote}/</span>{/if}{split.rest}</span>
               {:else}
                 <span
                   class={`ref ref-${ref.kind}`}
