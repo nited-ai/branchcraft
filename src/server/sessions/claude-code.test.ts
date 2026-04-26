@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { encodeProjectKey, extractTitle } from './claude-code.ts';
+import {
+  classifySource,
+  encodeProjectKey,
+  extractTitle,
+  extractTitleAndSource,
+} from './claude-code.ts';
 
 describe('encodeProjectKey', () => {
   it('matches the real-world Windows encoding', () => {
@@ -67,5 +72,81 @@ describe('extractTitle', () => {
       JSON.stringify({ type: 'message', role: 'assistant', content: 'answer' }),
     ].join('\n');
     expect(extractTitle(jsonl)).toBe('Untitled session');
+  });
+
+  it('unwraps a scheduled-task wrapper into "[scheduled] <name>"', () => {
+    const jsonl = JSON.stringify({
+      type: 'queue-operation',
+      operation: 'enqueue',
+      content:
+        '<scheduled-task name="pm-health-check" file="C:\\\\foo\\\\bar.md">\nbody…',
+    });
+    expect(extractTitle(jsonl)).toBe('[scheduled] pm-health-check');
+  });
+
+  it('unwraps a slash-command into "/cmd args"', () => {
+    const jsonl = JSON.stringify({
+      type: 'queue-operation',
+      operation: 'enqueue',
+      content:
+        '<command-message>foo</command-message>\n<command-name>/foo</command-name>\n<command-args>bar baz</command-args>',
+    });
+    expect(extractTitle(jsonl)).toBe('/foo bar baz');
+  });
+
+  it('strips a bare <command-message> block when no args present', () => {
+    const jsonl = JSON.stringify({
+      type: 'queue-operation',
+      operation: 'enqueue',
+      content: '<command-message>x</command-message>\nthe real prompt',
+    });
+    expect(extractTitle(jsonl)).toBe('the real prompt');
+  });
+});
+
+describe('classifySource', () => {
+  it('returns "user" for normal text', () => {
+    expect(classifySource('Hello, world')).toBe('user');
+  });
+
+  it('returns "scheduled-task" for the wrapper', () => {
+    expect(classifySource('<scheduled-task name="x">body')).toBe('scheduled-task');
+  });
+
+  it('returns "command" for a slash-command wrapper', () => {
+    expect(classifySource('<command-message>foo</command-message>')).toBe('command');
+  });
+
+  it('treats null as "user" (empty session)', () => {
+    expect(classifySource(null)).toBe('user');
+  });
+});
+
+describe('extractTitleAndSource', () => {
+  it('classifies + titles a scheduled-task in one pass', () => {
+    const jsonl = JSON.stringify({
+      type: 'queue-operation',
+      operation: 'enqueue',
+      content: '<scheduled-task name="pm-health-check" file="x">…',
+    });
+    expect(extractTitleAndSource(jsonl)).toEqual({
+      title: '[scheduled] pm-health-check',
+      source: 'scheduled-task',
+    });
+  });
+
+  it('keeps source="user" even when a custom-title overrides the visible title', () => {
+    const jsonl = [
+      JSON.stringify({
+        type: 'queue-operation',
+        operation: 'enqueue',
+        content: 'just chatting',
+      }),
+      JSON.stringify({ type: 'custom-title', customTitle: 'My session' }),
+    ].join('\n');
+    expect(extractTitleAndSource(jsonl)).toEqual({
+      title: 'My session',
+      source: 'user',
+    });
   });
 });

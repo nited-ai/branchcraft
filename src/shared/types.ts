@@ -19,6 +19,16 @@ export type SessionProviderId =
   | 'codex-desktop'
   | 'gemini-cli';
 
+export type SessionSource =
+  /** Started by a user typing a prompt or message. */
+  | 'user'
+  /** Invoked via a slash-command (`/foo`) — first message is wrapped in
+      `<command-message>` / `<command-args>` tags. */
+  | 'command'
+  /** Spawned by a scheduled-task fire. Not really a conversation; the
+      first message is a system wrapper describing the task. */
+  | 'scheduled-task';
+
 export interface Session {
   id: string;
   provider: SessionProviderId;
@@ -26,6 +36,9 @@ export interface Session {
   cwd: string;
   /** Display title — custom title if set, otherwise truncated first user message. */
   title: string;
+  /** What kind of session this is — drives whether the UI groups it as
+      a regular conversation or aggregates it under "background tasks". */
+  source: SessionSource;
   /** Unix seconds. Best-effort: file btime where available, else mtime. */
   startedAt: number;
   /** Unix seconds — last write to the session's storage. */

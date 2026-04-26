@@ -58,6 +58,7 @@ export const aiderProvider: SessionProvider = {
         provider: 'aider',
         cwd: wt,
         title: (lastUserMsg ?? 'Aider chat').slice(0, 80),
+        source: 'user',
         startedAt: lastSessionStart ?? Math.floor(stat.birthtimeMs / 1000),
         lastActivity,
         isLive: now - stat.mtimeMs < 2 * 60 * 1000,

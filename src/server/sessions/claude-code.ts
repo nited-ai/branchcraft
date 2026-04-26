@@ -27,6 +27,8 @@ export function encodeProjectKey(absPath: string): string {
 
 const projectsDir = (): string => join(homedir(), '.claude', 'projects');
 
+import type { SessionSource } from '../../shared/types.ts';
+
 type TitleScan = { customTitle: string | null; firstUserText: string | null };
 
 const EMPTY_SCAN: TitleScan = { customTitle: null, firstUserText: null };
@@ -55,21 +57,62 @@ function scanLine(line: string, acc: TitleScan): TitleScan {
     o.operation === 'enqueue' &&
     typeof o.content === 'string'
   ) {
-    return { ...acc, firstUserText: o.content.replace(/\s+/g, ' ').trim() };
+    return { ...acc, firstUserText: o.content.trim() };
   }
   return acc;
 }
 
+/**
+ * Inspect the first user content and classify what kind of session this is.
+ * CCD wraps non-conversational entry points in pseudo-XML that we recognize
+ * here — `<scheduled-task>` for cron-style fires, `<command-message>` for
+ * slash-commands. Everything else is a real chat.
+ */
+export function classifySource(firstUserText: string | null): SessionSource {
+  if (!firstUserText) return 'user';
+  const head = firstUserText.trimStart();
+  if (head.startsWith('<scheduled-task')) return 'scheduled-task';
+  if (head.startsWith('<command-message')) return 'command';
+  return 'user';
+}
+
+/**
+ * Pull a meaningful title out of CCD's wrapper formats:
+ *   - `<scheduled-task name="x" ...>` → `[scheduled] x`
+ *   - `<command-message>x</command-message>\n<command-args>y</command-args>`
+ *     → `/x` (or `/x y` truncated) — the actual command the user ran
+ *   - everything else → first ~80 chars of trimmed body
+ */
+function unwrapTitle(text: string): string {
+  const trimmed = text.trim();
+  // Scheduled-task: pull the task name attribute.
+  const sched = /^<scheduled-task[^>]*\sname="([^"]+)"/.exec(trimmed);
+  if (sched && sched[1]) return `[scheduled] ${sched[1]}`;
+  // Slash-command: name + args inline.
+  const cmd = /<command-name>([^<]+)<\/command-name>/.exec(trimmed);
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(trimmed);
+  if (cmd && cmd[1]) {
+    const name = cmd[1].trim();
+    const argText = args?.[1]?.trim() ?? '';
+    if (argText) return `${name} ${argText.replace(/\s+/g, ' ')}`.slice(0, 80);
+    return name.slice(0, 80);
+  }
+  // Strip a leading `<command-message>` block (without args present).
+  const stripped = trimmed.replace(/^<command-message>[\s\S]*?<\/command-message>\s*/, '');
+  return stripped.replace(/\s+/g, ' ').slice(0, 80);
+}
+
 function pickTitle(scan: TitleScan): string {
   if (scan.customTitle) return scan.customTitle.slice(0, 80);
-  if (scan.firstUserText) return scan.firstUserText.slice(0, 80);
+  if (scan.firstUserText) return unwrapTitle(scan.firstUserText) || 'Untitled session';
   return 'Untitled session';
 }
 
 /**
  * Walk a JSONL transcript and pull the best title we can find. Prefers an
  * explicit `custom-title` record; falls back to the first user message body
- * emitted as a `queue-operation` enqueue. Pure over a string — used by tests.
+ * emitted as a `queue-operation` enqueue (with wrapper-stripping). Pure over
+ * a string — used by tests.
  */
 export function extractTitle(jsonl: string): string {
   let acc = EMPTY_SCAN;
@@ -81,6 +124,21 @@ export function extractTitle(jsonl: string): string {
 }
 
 /**
+ * Like {@link extractTitle} but also returns the inferred {@link SessionSource}.
+ * The classification looks at the *raw* first user content, not the unwrapped
+ * title — `<scheduled-task>` and `<command-message>` are signals about the
+ * session's origin even when we manage to pull a clean title out of them.
+ */
+export function extractTitleAndSource(jsonl: string): { title: string; source: SessionSource } {
+  let acc = EMPTY_SCAN;
+  for (const line of jsonl.split('\n')) {
+    acc = scanLine(line, acc);
+    if (acc.customTitle) break;
+  }
+  return { title: pickTitle(acc), source: classifySource(acc.firstUserText) };
+}
+
+/**
  * Stream the file line-by-line and stop as soon as a `custom-title` is found
  * or {@link MAX_TITLE_LINES} lines have been read. CCD transcripts run into
  * the megabytes once thinking blocks accumulate, so reading the whole file
@@ -88,7 +146,9 @@ export function extractTitle(jsonl: string): string {
  */
 const MAX_TITLE_LINES = 500;
 
-async function extractTitleFromFile(file: string): Promise<string> {
+async function extractTitleAndSourceFromFile(
+  file: string,
+): Promise<{ title: string; source: SessionSource }> {
   const stream = createReadStream(file, { encoding: 'utf-8' });
   const rl = createInterface({ input: stream, crlfDelay: Infinity });
   let acc = EMPTY_SCAN;
@@ -103,7 +163,7 @@ async function extractTitleFromFile(file: string): Promise<string> {
     rl.close();
     stream.destroy();
   }
-  return pickTitle(acc);
+  return { title: pickTitle(acc), source: classifySource(acc.firstUserText) };
 }
 
 async function scanWorktree(worktreePath: string): Promise<Session[]> {
@@ -121,12 +181,15 @@ async function scanWorktree(worktreePath: string): Promise<Session[]> {
     } catch {
       continue;
     }
-    const title = await extractTitleFromFile(file).catch(() => 'Untitled session');
+    const { title, source } = await extractTitleAndSourceFromFile(file).catch(
+      () => ({ title: 'Untitled session', source: 'user' as const }),
+    );
     out.push({
       id: name.replace(/\.jsonl$/, ''),
       provider: 'claude-code',
       cwd: worktreePath,
       title,
+      source,
       startedAt: Math.floor(stat.birthtimeMs / 1000),
       lastActivity: Math.floor(stat.mtimeMs / 1000),
       isLive: now - stat.mtimeMs < 2 * 60 * 1000,

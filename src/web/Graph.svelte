@@ -33,11 +33,14 @@
   const CARD_H = 30;
   const HINT_H = 18;
   const PILL_H = 24;
+  const SESSION_FOLD_H = 22;
   const CARD_GAP = 4;
   /** Collapsed-run row height — short, since it's a placeholder. */
   const COLLAPSED_H = 22;
   /** Min consecutive plain commits before we fold them. */
   const COLLAPSE_THRESHOLD = 3;
+  /** Min sessions on a worktree before we fold them. */
+  const SESSION_FOLD_THRESHOLD = 3;
 
   const laneX = (lane: number): number => PAD + lane * LANE_W + LANE_W / 2;
 
@@ -56,6 +59,11 @@
   // AND isn't simulated. Three or more consecutive plain commits collapse
   // into a single short row showing "▸ N commits".
   let expandedRuns = $state(new Set<string>());
+
+  // Per-worktree expansion state for the session-pill list. Worktrees with
+  // many CCD sessions (esp. background scheduled-task fires) drown the card
+  // otherwise — same fold pattern as commits.
+  let expandedSessions = $state(new Set<string>());
 
   function isPlain(c: LaidOutCommit, wts: Worktree[]): boolean {
     if (c.simulated) return false;
@@ -90,10 +98,20 @@
       };
 
   function worktreeBlockHeight(wt: Worktree): number {
-    const sessionH = wt.sessions.length === 0
-      ? HINT_H
-      : wt.sessions.length * PILL_H;
-    return CARD_H + sessionH;
+    const n = wt.sessions.length;
+    if (n === 0) return CARD_H + HINT_H;
+    if (n >= SESSION_FOLD_THRESHOLD && !expandedSessions.has(wt.path)) {
+      // One toggle row only — pills hidden.
+      return CARD_H + SESSION_FOLD_H;
+    }
+    return CARD_H + n * PILL_H + (n >= SESSION_FOLD_THRESHOLD ? SESSION_FOLD_H : 0);
+  }
+
+  function toggleSessions(path: string) {
+    const next = new Set(expandedSessions);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    expandedSessions = next;
   }
 
   let rows = $derived.by<Row[]>(() => {
@@ -259,6 +277,7 @@
   });
 
   type SessionLayout = { key: string; top: number; session: Session };
+  type SessionFold = { top: number; total: number; live: number; expanded: boolean };
   type CardLayout = {
     key: string;
     worktree: Worktree;
@@ -267,6 +286,7 @@
     connectorTop: number;
     connectorHeight: number;
     sessions: SessionLayout[];
+    sessionFold: SessionFold | null;
     /** Top of the "no sessions" stub when worktree.sessions is empty. */
     hintTop: number | null;
   };
@@ -278,12 +298,37 @@
       let cursor = r.top + ROW_H + CARD_GAP;
       for (const wt of r.worktrees) {
         const cardTop = cursor;
-        const sessionsTop = cardTop + CARD_H;
-        const sessions: SessionLayout[] = wt.sessions.map((s, i) => ({
-          key: `${wt.path}|${s.id}`,
-          top: sessionsTop + i * PILL_H,
-          session: s,
-        }));
+        const afterCard = cardTop + CARD_H;
+        const n = wt.sessions.length;
+
+        let sessionFold: SessionFold | null = null;
+        let pillsTop = afterCard;
+        let sessions: SessionLayout[] = [];
+
+        if (n >= SESSION_FOLD_THRESHOLD) {
+          const expanded = expandedSessions.has(wt.path);
+          sessionFold = {
+            top: afterCard,
+            total: n,
+            live: wt.sessions.filter((s) => s.isLive).length,
+            expanded,
+          };
+          pillsTop = afterCard + SESSION_FOLD_H;
+          if (expanded) {
+            sessions = wt.sessions.map((s, i) => ({
+              key: `${wt.path}|${s.id}`,
+              top: pillsTop + i * PILL_H,
+              session: s,
+            }));
+          }
+        } else if (n > 0) {
+          sessions = wt.sessions.map((s, i) => ({
+            key: `${wt.path}|${s.id}`,
+            top: pillsTop + i * PILL_H,
+            session: s,
+          }));
+        }
+
         out.push({
           key: `${r.commit.sha}|${wt.path}`,
           worktree: wt,
@@ -292,7 +337,8 @@
           connectorTop: r.dotY,
           connectorHeight: cardTop + CARD_H / 2 - r.dotY,
           sessions,
-          hintTop: wt.sessions.length === 0 ? sessionsTop : null,
+          sessionFold,
+          hintTop: n === 0 ? afterCard : null,
         });
         cursor += worktreeBlockHeight(wt);
       }
@@ -511,6 +557,25 @@
       <div class="session-hint" style="top: {card.hintTop}px;">
         <span class="hint-glyph mono" aria-hidden="true">·</span>
         <span class="dim">no sessions</span>
+      </div>
+    {/if}
+    {#if card.sessionFold}
+      <div class="session-fold" style="top: {card.sessionFold.top}px;">
+        <button
+          class="session-fold-btn"
+          onclick={() => toggleSessions(card.worktree.path)}
+          title={card.sessionFold.expanded
+            ? 'Hide sessions'
+            : `Show ${card.sessionFold.total} sessions`}
+        >
+          <span class="chev mono" aria-hidden="true">{card.sessionFold.expanded ? '▾' : '▸'}</span>
+          <span class="count mono">{card.sessionFold.total}</span>
+          <span class="lbl">sessions</span>
+          {#if card.sessionFold.live > 0}
+            <span class="live-dot" aria-hidden="true"></span>
+            <span class="live-count mono">{card.sessionFold.live} live</span>
+          {/if}
+        </button>
       </div>
     {/if}
     {#each card.sessions as s (s.key)}
@@ -736,6 +801,64 @@
     display: flex;
     align-items: center;
     padding-right: var(--s4);
+  }
+
+  .session-fold {
+    position: absolute;
+    left: calc(var(--svg-w) + var(--s4) + var(--s5));
+    height: 22px;
+    display: flex;
+    align-items: center;
+  }
+
+  .session-fold-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    background: transparent;
+    border: 1px dashed var(--hairline);
+    border-radius: 4px;
+    padding: 2px 8px;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: color 100ms ease, border-color 100ms ease;
+  }
+
+  .session-fold-btn:hover {
+    color: var(--branch-2);
+    border-color: var(--branch-2);
+    border-style: solid;
+  }
+
+  .session-fold-btn .chev {
+    color: var(--branch-2);
+    font-size: 10px;
+    width: 10px;
+    text-align: center;
+  }
+
+  .session-fold-btn .count {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .session-fold-btn .lbl {
+    color: var(--text-secondary);
+  }
+
+  .session-fold-btn .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    margin-left: var(--s2);
+  }
+
+  .session-fold-btn .live-count {
+    color: var(--success);
+    font-size: 10px;
   }
 
   .drag-ghost {
