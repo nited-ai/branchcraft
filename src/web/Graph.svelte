@@ -4,6 +4,7 @@
   import SessionPill from './SessionPill.svelte';
   import ContextHelp from './ContextHelp.svelte';
   import type { HelpContent } from './ContextHelp.svelte';
+  import DisambigPopup from './DisambigPopup.svelte';
 
   type Props = {
     commits: LaidOutCommit[];
@@ -49,6 +50,14 @@
     | { kind: 'ref'; refName: string }
     | { kind: 'worktree'; worktreePath: string };
   let dropTarget = $state<DropTarget | null>(null);
+
+  type PendingDisambig = {
+    fromName: string;
+    intoName: string;
+    x: number;
+    y: number;
+  };
+  let disambig = $state<PendingDisambig | null>(null);
 
   const ROW_H = 36;
   const LANE_W = 22;
@@ -490,13 +499,15 @@
         });
       } else if (d.kind === 'ref') {
         if (d.name === target.refName) return;
-        // Default to merge — disambig popup (PLAN.md §4.4) later.
-        onQueueCommand({
-          kind: 'merge',
-          from: d.name,
-          into: target.refName,
-          ff: 'auto',
-        });
+        // Per PLAN.md §4.4, ask whether to merge / rebase / squash. Pop the
+        // disambig popup at the cursor; we resolve to a queued command in the
+        // popup's onChoose callback.
+        disambig = {
+          fromName: d.name,
+          intoName: target.refName,
+          x: dragCursor.x,
+          y: dragCursor.y,
+        };
       } else if (d.kind === 'worktree') {
         // Drag-from-worktree onto a ref pill = check that worktree out at the ref.
         onQueueCommand({ kind: 'checkout', worktree: d.path, target: target.refName });
@@ -975,6 +986,31 @@
       </div>
     {/each}
   {/each}
+
+  <DisambigPopup
+    open={disambig !== null}
+    fromName={disambig?.fromName ?? ''}
+    intoName={disambig?.intoName ?? ''}
+    x={disambig?.x ?? 0}
+    y={disambig?.y ?? 0}
+    onChoose={(c) => {
+      if (!disambig || !onQueueCommand) {
+        disambig = null;
+        return;
+      }
+      if (c === 'merge') {
+        onQueueCommand({ kind: 'merge', from: disambig.fromName, into: disambig.intoName, ff: 'auto' });
+      } else if (c === 'rebase') {
+        onQueueCommand({ kind: 'rebase', branch: disambig.fromName, onto: disambig.intoName });
+      } else if (c === 'squash') {
+        // Squash uses merge with --squash semantics; reuse merge command with ff='no' as a stand-in
+        // until a dedicated squash command is added in a later pass.
+        onQueueCommand({ kind: 'merge', from: disambig.fromName, into: disambig.intoName, ff: 'no' });
+      }
+      disambig = null;
+    }}
+    onCancel={() => (disambig = null)}
+  />
 
   <ContextHelp content={helpContent} x={cursorPos.x} y={cursorPos.y} />
 
