@@ -74,10 +74,16 @@
         height: number;
       }
     | {
-        kind: 'collapsed';
+        /**
+         * Fold-toggle row for a run of plain commits. Always emitted for
+         * every run (independent of state) so the user can re-collapse an
+         * expanded run — same affordance, just a different chevron.
+         */
+        kind: 'fold';
         key: string;
         commits: LaidOutCommit[];
         lane: number;
+        expanded: boolean;
         top: number;
         dotY: number;
         height: number;
@@ -91,6 +97,10 @@
   }
 
   let rows = $derived.by<Row[]>(() => {
+    // First, group consecutive plain commits into runs. Runs above the
+    // threshold get a single fold-toggle row PLUS — when expanded — the
+    // children below. Runs under the threshold stay flat (no toggle, no
+    // visual disruption for two-commit gaps).
     type Group =
       | { kind: 'commit'; commit: LaidOutCommit; worktrees: Worktree[] }
       | { kind: 'run'; key: string; commits: LaidOutCommit[]; lane: number };
@@ -100,11 +110,7 @@
       if (buf.length === 0) return;
       if (buf.length >= COLLAPSE_THRESHOLD) {
         const key = `${buf[0]!.sha}..${buf[buf.length - 1]!.sha}`;
-        if (expandedRuns.has(key)) {
-          for (const c of buf) groups.push({ kind: 'commit', commit: c, worktrees: [] });
-        } else {
-          groups.push({ kind: 'run', key, commits: buf, lane: buf[0]!.lane });
-        }
+        groups.push({ kind: 'run', key, commits: buf, lane: buf[0]!.lane });
       } else {
         for (const c of buf) groups.push({ kind: 'commit', commit: c, worktrees: [] });
       }
@@ -123,34 +129,47 @@
 
     const result: Row[] = [];
     let top = PAD;
+    const emitCommitRow = (
+      c: LaidOutCommit,
+      wts: Worktree[],
+    ) => {
+      let extras = 0;
+      if (wts.length > 0) {
+        extras = CARD_GAP;
+        for (const wt of wts) extras += worktreeBlockHeight(wt);
+      }
+      const height = ROW_H + extras;
+      result.push({
+        kind: 'commit',
+        commit: c,
+        worktrees: wts,
+        top,
+        dotY: top + ROW_H / 2,
+        height,
+      });
+      top += height;
+    };
     for (const g of groups) {
       if (g.kind === 'commit') {
-        let extras = 0;
-        if (g.worktrees.length > 0) {
-          extras = CARD_GAP;
-          for (const wt of g.worktrees) extras += worktreeBlockHeight(wt);
-        }
-        const height = ROW_H + extras;
-        result.push({
-          kind: 'commit',
-          commit: g.commit,
-          worktrees: g.worktrees,
-          top,
-          dotY: top + ROW_H / 2,
-          height,
-        });
-        top += height;
+        emitCommitRow(g.commit, g.worktrees);
       } else {
+        const expanded = expandedRuns.has(g.key);
+        // Always emit the fold-toggle, regardless of expanded state. That's
+        // the affordance to re-collapse — without it, expanding is one-way.
         result.push({
-          kind: 'collapsed',
+          kind: 'fold',
           key: g.key,
           commits: g.commits,
           lane: g.lane,
+          expanded,
           top,
           dotY: top + COLLAPSED_H / 2,
           height: COLLAPSED_H,
         });
         top += COLLAPSED_H;
+        if (expanded) {
+          for (const c of g.commits) emitCommitRow(c, []);
+        }
       }
     }
     return result;
@@ -162,10 +181,17 @@
    * collapsed row's dot position rather than on a non-rendered commit.
    */
   let rowBySha = $derived.by(() => {
+    // When a run is expanded, every commit has its own row AND there's a
+    // fold-toggle row above it. The commit-row wins (last write) so edges
+    // land on the actual commit dot, not the toggle.
     const m = new Map<string, Row>();
     for (const r of rows) {
+      if (r.kind === 'fold' && !r.expanded) {
+        for (const c of r.commits) m.set(c.sha, r);
+      }
+    }
+    for (const r of rows) {
       if (r.kind === 'commit') m.set(r.commit.sha, r);
-      else for (const c of r.commits) m.set(c.sha, r);
     }
     return m;
   });
@@ -209,7 +235,7 @@
         // If the parent fell into a collapsed run, draw the edge to that
         // run's lane (it's a homogeneous run on a single lane).
         const targetLane =
-          parentRow.kind === 'collapsed' ? parentRow.lane : parentLane;
+          parentRow.kind === 'fold' ? parentRow.lane : parentLane;
         const childLane = i === 0 ? c.lane : targetLane;
         const colorLane = i === 0 ? c.lane : targetLane;
         const parentSimulated =
@@ -378,7 +404,7 @@
       />
     {/each}
 
-    {#each rows as r (r.kind === 'commit' ? r.commit.sha : r.key)}
+    {#each rows as r (r.kind === 'commit' ? r.commit.sha : `${r.key}#${r.expanded ? 'x' : 'c'}`)}
       {#if r.kind === 'commit'}
         {#if isHead(r.commit)}
           <circle
@@ -404,8 +430,8 @@
           opacity={r.commit.simulated ? 0.7 : 1}
           onpointerdown={!r.commit.simulated && onQueueCommand ? (e) => onCommitPointerDown(r.commit, e) : undefined}
         />
-      {:else}
-        <!-- Collapsed run: short vertical lane segment so the line stays continuous -->
+      {:else if !r.expanded}
+        <!-- Folded run: short dashed segment so the lane stays visually continuous. -->
         <line
           x1={laneX(r.lane)}
           y1={r.top}
@@ -421,7 +447,7 @@
   </svg>
 
   <ol class="labels">
-    {#each rows as r (r.kind === 'commit' ? r.commit.sha : r.key)}
+    {#each rows as r (r.kind === 'commit' ? r.commit.sha : `${r.key}#${r.expanded ? 'x' : 'c'}`)}
       {#if r.kind === 'commit'}
         <li style="top: {r.top}px; height: {ROW_H}px;">
           <span class="sha mono">{shortSha(r.commit.sha)}</span>
@@ -442,18 +468,26 @@
           <span class="subject">{r.commit.subject}</span>
         </li>
       {:else}
-        <li style="top: {r.top}px; height: {r.height}px;" class="collapsed-row">
+        <li
+          style="top: {r.top}px; height: {r.height}px;"
+          class="fold-row"
+          class:expanded={r.expanded}
+        >
           <button
             class="collapse-toggle"
             onclick={() => toggleRun(r.key)}
-            title="Show {r.commits.length} hidden commits"
+            title={r.expanded
+              ? `Collapse these ${r.commits.length} commits`
+              : `Show ${r.commits.length} hidden commits`}
           >
-            <span class="chev mono" aria-hidden="true">▸</span>
+            <span class="chev mono" aria-hidden="true">{r.expanded ? '▾' : '▸'}</span>
             <span class="count mono">{r.commits.length}</span>
             <span class="lbl">commits</span>
-            <span class="range mono">
-              {shortSha(r.commits[0]!.sha)}…{shortSha(r.commits[r.commits.length - 1]!.sha)}
-            </span>
+            {#if !r.expanded}
+              <span class="range mono">
+                {shortSha(r.commits[0]!.sha)}…{shortSha(r.commits[r.commits.length - 1]!.sha)}
+              </span>
+            {/if}
           </button>
         </li>
       {/if}
@@ -580,7 +614,7 @@
     cursor: grab;
   }
 
-  .collapsed-row {
+  .fold-row {
     padding-left: var(--s4);
   }
 
@@ -596,7 +630,7 @@
     font: inherit;
     font-size: 11px;
     cursor: pointer;
-    transition: color 100ms ease, border-color 100ms ease;
+    transition: color 100ms ease, border-color 100ms ease, background 100ms ease;
   }
 
   .collapse-toggle:hover {
@@ -605,9 +639,23 @@
     border-style: solid;
   }
 
+  /* Expanded toggle reads as a section header, not a fat button. */
+  .fold-row.expanded .collapse-toggle {
+    border-style: solid;
+    border-color: transparent;
+    background: rgba(212, 165, 74, 0.04);
+    color: var(--text-secondary);
+  }
+
+  .fold-row.expanded .collapse-toggle:hover {
+    border-color: var(--branch-2);
+  }
+
   .collapse-toggle .chev {
     color: var(--branch-2);
     font-size: 10px;
+    width: 10px;
+    text-align: center;
   }
 
   .collapse-toggle .count {

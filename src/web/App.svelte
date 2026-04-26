@@ -46,6 +46,21 @@
   let rucksacks = $state<ApiRucksacks | null>(null);
   let rucksacksLoading = $state(false);
 
+  // Side-panel collapsed state. Persisted in localStorage so the user's
+  // layout sticks across reloads (PLAN.md §4.1.3 prescribes hub config
+  // persistence; localStorage is fine for MVP).
+  let sidebarCollapsed = $state(false);
+  let rucksacksCollapsed = $state(false);
+
+  const SIDEBAR_KEY = 'branchcraft.sidebar.collapsed';
+  const RUCKSACKS_KEY = 'branchcraft.rucksacks.collapsed';
+
+  let layoutCols = $derived.by(() => {
+    const left = sidebarCollapsed ? '32px' : '240px';
+    const right = rucksacksCollapsed ? '32px' : '240px';
+    return `${left} 1fr ${right}`;
+  });
+
   let branchSuggestions = $derived.by(() => {
     const set = new Set<string>();
     for (const c of baseCommits.length ? baseCommits : graphCommits) {
@@ -234,6 +249,32 @@
     }
   }
 
+  function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    try { localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed ? '1' : '0'); } catch { /* ignore */ }
+  }
+
+  function toggleRucksacks() {
+    rucksacksCollapsed = !rucksacksCollapsed;
+    try { localStorage.setItem(RUCKSACKS_KEY, rucksacksCollapsed ? '1' : '0'); } catch { /* ignore */ }
+  }
+
+  function onGlobalKeydown(e: KeyboardEvent) {
+    // Ignore when the user is typing into an input/textarea — they want a
+    // literal "[" / "]" character, not a panel toggle.
+    const t = e.target;
+    if (t instanceof HTMLElement) {
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+    }
+    if (e.key === '[' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      toggleSidebar();
+    } else if (e.key === ']' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      toggleRucksacks();
+    }
+  }
+
   onMount(async () => {
     const saved = localStorage.getItem('branchcraft.theme');
     if (saved === 'dark' || saved === 'light') {
@@ -241,6 +282,9 @@
     } else if (window.matchMedia?.('(prefers-color-scheme: light)').matches) {
       theme = 'light';
     }
+    sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === '1';
+    rucksacksCollapsed = localStorage.getItem(RUCKSACKS_KEY) === '1';
+    window.addEventListener('keydown', onGlobalKeydown);
 
     try {
       const [healthRes, reposRes] = await Promise.all([
@@ -278,13 +322,15 @@
   }
 </script>
 
-<div class="layout">
+<div class="layout" style="--layout-cols: {layoutCols};">
   <RepoSidebar
     {repos}
     activeId={activeRepoId}
+    collapsed={sidebarCollapsed}
     onSwitch={switchRepo}
     onAdd={() => (modalOpen = true)}
     onRemove={removeRepo}
+    onToggleCollapse={toggleSidebar}
   />
 
   <main>
@@ -366,7 +412,12 @@
     </footer>
   </main>
 
-  <Rucksacks data={rucksacks} loading={rucksacksLoading} />
+  <Rucksacks
+    data={rucksacks}
+    loading={rucksacksLoading}
+    collapsed={rucksacksCollapsed}
+    onToggleCollapse={toggleRucksacks}
+  />
 </div>
 
 <AddRepoModal
@@ -387,8 +438,9 @@
 <style>
   .layout {
     display: grid;
-    grid-template-columns: 240px 1fr 240px;
+    grid-template-columns: var(--layout-cols);
     min-height: 100vh;
+    transition: grid-template-columns 160ms ease;
   }
 
   main {

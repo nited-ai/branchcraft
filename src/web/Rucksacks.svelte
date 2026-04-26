@@ -4,8 +4,10 @@
   type Props = {
     data: ApiRucksacks | null;
     loading: boolean;
+    collapsed: boolean;
+    onToggleCollapse: () => void;
   };
-  let { data, loading }: Props = $props();
+  let { data, loading, collapsed, onToggleCollapse }: Props = $props();
 
   // Each section is independently collapsible — state remembered in
   // localStorage per-section so a user's layout survives reloads. Stash is
@@ -64,9 +66,28 @@
   let reflogCount = $derived(data?.reflog.length ?? 0);
 </script>
 
+{#if collapsed}
+  <aside class="rucksacks-collapsed" aria-label="Rucksacks (collapsed)">
+    <button
+      class="expand"
+      onclick={onToggleCollapse}
+      title="Expand rucksacks (])"
+      aria-label="Expand rucksacks"
+    >
+      <span class="chev mono" aria-hidden="true">◂</span>
+      <span class="vlabel mono">RUCKSACKS</span>
+    </button>
+  </aside>
+{:else}
 <aside class="rucksacks" aria-label="Stash, tags, reflog">
   <div class="hd">
     <span class="title">Rucksacks</span>
+    <button
+      class="collapse-btn"
+      onclick={onToggleCollapse}
+      title="Collapse rucksacks (])"
+      aria-label="Collapse rucksacks"
+    ><span aria-hidden="true">▶</span></button>
   </div>
 
   <section class="rucksack" class:open={open.stash}>
@@ -166,6 +187,7 @@
     {/if}
   </section>
 </aside>
+{/if}
 
 <style>
   .rucksacks {
@@ -183,6 +205,9 @@
   }
 
   .hd {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     padding-bottom: var(--s2);
     border-bottom: 1px solid var(--hairline);
     margin-bottom: var(--s2);
@@ -194,6 +219,65 @@
     color: var(--branch-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
+  }
+
+  .collapse-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .collapse-btn:hover {
+    color: var(--branch-2);
+    border-color: var(--hairline);
+  }
+
+  .rucksacks-collapsed {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100vh;
+    padding: var(--s4) 0;
+    box-sizing: border-box;
+    border-left: 1px solid var(--hairline);
+    background: var(--bg);
+    position: sticky;
+    top: 0;
+  }
+
+  .rucksacks-collapsed .expand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s3);
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+    padding: var(--s2);
+  }
+
+  .rucksacks-collapsed .expand:hover {
+    color: var(--branch-2);
+  }
+
+  .rucksacks-collapsed .chev {
+    font-size: 12px;
+  }
+
+  .rucksacks-collapsed .vlabel {
+    writing-mode: vertical-rl;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--branch-2);
+    font-weight: 600;
   }
 
   .rucksack {

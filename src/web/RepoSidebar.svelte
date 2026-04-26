@@ -4,12 +4,22 @@
   type Props = {
     repos: ApiRepoSummary[];
     activeId: string | null;
+    collapsed: boolean;
     onSwitch: (id: string) => void;
     onAdd: () => void;
     onRemove: (id: string) => void;
+    onToggleCollapse: () => void;
   };
 
-  let { repos, activeId, onSwitch, onAdd, onRemove }: Props = $props();
+  let {
+    repos,
+    activeId,
+    collapsed,
+    onSwitch,
+    onAdd,
+    onRemove,
+    onToggleCollapse,
+  }: Props = $props();
 
   function statusLabel(r: ApiRepoSummary): string {
     if (r.status === 'stale') return `${r.staleCount} stale`;
@@ -19,10 +29,29 @@
   }
 </script>
 
+{#if collapsed}
+  <aside class="hub-collapsed" aria-label="Repos (collapsed)">
+    <button
+      class="expand"
+      onclick={onToggleCollapse}
+      title="Expand repo hub ([)"
+      aria-label="Expand repo hub"
+    >
+      <span class="chev mono" aria-hidden="true">▸</span>
+      <span class="vlabel mono">REPOS</span>
+    </button>
+  </aside>
+{:else}
 <aside class="hub">
   <div class="hub-header">
     <span class="title">Repos</span>
     <span class="count mono">{repos.length}</span>
+    <button
+      class="collapse-btn"
+      onclick={onToggleCollapse}
+      title="Collapse sidebar ([)"
+      aria-label="Collapse sidebar"
+    ><span aria-hidden="true">◀</span></button>
   </div>
 
   {#if repos.length === 0}
@@ -66,6 +95,7 @@
 
   <button class="add" onclick={onAdd}>+ Add repo</button>
 </aside>
+{/if}
 
 <style>
   .hub {
@@ -84,10 +114,75 @@
 
   .hub-header {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
+    gap: var(--s2);
     padding-bottom: var(--s2);
     border-bottom: 1px solid var(--hairline);
+  }
+
+  .hub-header .title {
+    flex: 1;
+  }
+
+  .collapse-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .collapse-btn:hover {
+    color: var(--branch-2);
+    border-color: var(--hairline);
+  }
+
+  .hub-collapsed {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100vh;
+    padding: var(--s4) 0;
+    box-sizing: border-box;
+    border-right: 1px solid var(--hairline);
+    background: var(--bg);
+    position: sticky;
+    top: 0;
+  }
+
+  .hub-collapsed .expand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s3);
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+    padding: var(--s2);
+  }
+
+  .hub-collapsed .expand:hover {
+    color: var(--branch-2);
+  }
+
+  .hub-collapsed .chev {
+    font-size: 12px;
+  }
+
+  .hub-collapsed .vlabel {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--branch-2);
+    font-weight: 600;
   }
 
   .title {
