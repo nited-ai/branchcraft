@@ -76,6 +76,8 @@ export interface ApiHealth {
 export interface ApiWorktrees {
   repoPath: string;
   worktrees: Worktree[];
+  /** Branch divergence conflicts at the time of the response. */
+  divergence: DivergenceConflict[];
 }
 
 export type RefKind = 'branch' | 'remote' | 'tag' | 'head' | 'stash';

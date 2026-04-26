@@ -4,6 +4,9 @@ import { cors } from 'hono/cors';
 import { basename, dirname, resolve } from 'node:path';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync = promisify(execFile);
 import { isGitRepo, listWorktrees } from './git/worktrees.ts';
 import { gitLog } from './git/log.ts';
 import { assignLanes } from './git/layout.ts';
@@ -16,6 +19,7 @@ import {
 import { applyCommands } from './git/apply.ts';
 import { listReflog, listStash, listTags } from './git/rucksacks.ts';
 import { getOrCreateActivityManager } from './activity/index.ts';
+import { detectDivergence } from './activity/conflicts.ts';
 import {
   addRepo as cfgAddRepo,
   findRepoById,
@@ -35,6 +39,7 @@ import type {
   ApiSimulateRequest,
   ApiWorktrees,
   Command,
+  DivergenceConflict,
   RepoStatusKind,
   Worktree,
   WorktreeStatus,
@@ -118,6 +123,54 @@ async function enrichWorktrees(repoPath: string): Promise<Worktree[]> {
   );
 }
 
+async function gitDiffNamesSinceBase(
+  repoPath: string,
+  branch: string,
+  base: string,
+): Promise<Set<string>> {
+  try {
+    const { stdout } = await execFileAsync('git', ['diff', '--name-only', `${base}...${branch}`], {
+      cwd: repoPath,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return new Set(stdout.split(/\r?\n/).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+async function computeDivergence(repoPath: string): Promise<DivergenceConflict[]> {
+  // Use the repo's default branch (HEAD-of-origin/HEAD) as the merge-base
+  // anchor. If origin/HEAD isn't set, fall back to "main"; if that fails
+  // too, skip divergence entirely.
+  let base = '';
+  try {
+    const { stdout } = await execFileAsync('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], {
+      cwd: repoPath,
+    });
+    base = stdout.trim();
+  } catch {
+    base = 'main';
+  }
+  let branchList = '';
+  try {
+    const { stdout } = await execFileAsync('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], {
+      cwd: repoPath,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    branchList = stdout;
+  } catch {
+    return [];
+  }
+  const branches = branchList.split(/\r?\n/).filter(Boolean);
+  const map = new Map<string, Set<string>>();
+  for (const b of branches) {
+    if (b === base) continue;
+    map.set(b, await gitDiffNamesSinceBase(repoPath, b, base));
+  }
+  return detectDivergence(map);
+}
+
 async function summarize(
   id: string,
   path: string,
@@ -197,8 +250,11 @@ app.get('/api/repos/:id/worktrees', async (c) => {
   if (!(await isGitRepo(repo.path))) {
     return c.json({ error: 'not_a_git_repo', path: repo.path }, 400);
   }
-  const enriched = await enrichWorktrees(repo.path);
-  const body: ApiWorktrees = { repoPath: repo.path, worktrees: enriched };
+  const [enriched, divergence] = await Promise.all([
+    enrichWorktrees(repo.path),
+    computeDivergence(repo.path),
+  ]);
+  const body: ApiWorktrees = { repoPath: repo.path, worktrees: enriched, divergence };
   return c.json(body);
 });
 
