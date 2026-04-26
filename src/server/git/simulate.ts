@@ -158,6 +158,12 @@ export class Simulator {
         return this.applyReset(state, cmd);
       case 'push':
         return this.applyPush(state, cmd);
+      case 'checkout':
+        // Checkout doesn't change the graph — it only moves which worktree
+        // is at which commit. We don't model worktree-head in SimState, so
+        // there's nothing to preview here. The queue still shows it and
+        // apply executes it for real.
+        return state;
     }
   }
 

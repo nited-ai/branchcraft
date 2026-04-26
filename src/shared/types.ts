@@ -160,7 +160,15 @@ export type Command =
       to: Sha | RefName;
       mode?: 'soft' | 'mixed' | 'hard';
     }
-  | { kind: 'push'; branch: RefName; remote?: string; force?: 'lease' | true };
+  | { kind: 'push'; branch: RefName; remote?: string; force?: 'lease' | true }
+  | {
+      /** Switch a specific worktree to a branch or commit. Doesn't touch
+          the graph topology — only changes what a worktree is checked out
+          at. Detaches HEAD if the target is a sha. */
+      kind: 'checkout';
+      worktree: string;
+      target: Sha | RefName;
+    };
 
 export interface ApiSimulateRequest {
   commands: Command[];

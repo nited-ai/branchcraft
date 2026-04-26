@@ -31,6 +31,14 @@ export function commandSummary(cmd: Command): string {
             : '';
       return `push ${cmd.branch} → ${cmd.remote ?? 'origin'}${force}`;
     }
+    case 'checkout': {
+      const wt = cmd.worktree.split(/[/\\]/).filter(Boolean).at(-1) ?? cmd.worktree;
+      const target =
+        typeof cmd.target === 'string' && /^[0-9a-f]{4,40}$/i.test(cmd.target)
+          ? cmd.target.slice(0, 7)
+          : cmd.target;
+      return `checkout ${target} in ${wt}`;
+    }
   }
 }
 
@@ -46,4 +54,6 @@ export const COMMAND_BLURB: Record<Command['kind'], string> = {
     'Moves a branch ref to a different commit. --hard discards working changes, --soft keeps them staged, --mixed (default) keeps them unstaged.',
   push:
     'Sends local commits to the remote. --force-with-lease only overwrites if the remote hasn’t changed since you last fetched.',
+  checkout:
+    'Switches a worktree to a branch or commit. Each worktree can be on a different branch — that’s how you run multiple AI agents in parallel without them interfering.',
 };

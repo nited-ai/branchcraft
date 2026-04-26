@@ -73,6 +73,13 @@ async function execCommand(
       else if (cmd.force === true) args.push('--force');
       return { output: await runGit(cwd, args) };
     }
+    case 'checkout': {
+      // Run inside the *target* worktree directly — `git -C <wt> checkout
+      // <ref>` switches that worktree's HEAD without touching any others.
+      // findWorktreeForBranch isn't used here: the user picks the worktree
+      // explicitly via the drop target.
+      return { output: await runGit(cmd.worktree, ['checkout', String(cmd.target)]) };
+    }
   }
 }
 

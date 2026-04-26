@@ -44,7 +44,10 @@
     | null;
   let drag = $state<Drag>(null);
   let dragCursor = $state({ x: 0, y: 0 });
-  let dropTarget = $state<{ refName: string; commitSha?: string } | null>(null);
+  type DropTarget =
+    | { kind: 'ref'; refName: string }
+    | { kind: 'worktree'; worktreePath: string };
+  let dropTarget = $state<DropTarget | null>(null);
 
   const ROW_H = 36;
   const LANE_W = 22;
@@ -453,12 +456,15 @@
   function onPointerMove(e: PointerEvent) {
     dragCursor = { x: e.clientX, y: e.clientY };
     const els = document.elementsFromPoint(e.clientX, e.clientY);
-    let found: { refName: string; commitSha?: string } | null = null;
+    let found: DropTarget | null = null;
     for (const el of els) {
       if (!(el instanceof HTMLElement)) continue;
-      const refName = el.dataset.dropRef;
-      if (refName) {
-        found = { refName };
+      if (el.dataset.dropRef) {
+        found = { kind: 'ref', refName: el.dataset.dropRef };
+        break;
+      }
+      if (el.dataset.dropWorktree) {
+        found = { kind: 'worktree', worktreePath: el.dataset.dropWorktree };
         break;
       }
     }
@@ -473,20 +479,33 @@
     drag = null;
     dropTarget = null;
     if (!target || !d || !onQueueCommand) return;
-    if (d.kind === 'commit') {
+
+    if (target.kind === 'ref') {
+      if (d.kind === 'commit') {
+        onQueueCommand({
+          kind: 'cherry-pick',
+          commits: [d.sha],
+          onto: target.refName,
+        });
+      } else if (d.kind === 'ref') {
+        if (d.name === target.refName) return;
+        // Default to merge — disambig popup (PLAN.md §4.4) later.
+        onQueueCommand({
+          kind: 'merge',
+          from: d.name,
+          into: target.refName,
+          ff: 'auto',
+        });
+      }
+    } else if (target.kind === 'worktree') {
+      // Drop on a worktree card → checkout that target into that worktree.
+      // Works for both commit dots (detached checkout) and branch refs
+      // (branch checkout). Source is whatever the user grabbed.
+      const targetSpec = d.kind === 'commit' ? d.sha : d.name;
       onQueueCommand({
-        kind: 'cherry-pick',
-        commits: [d.sha],
-        onto: target.refName,
-      });
-    } else if (d.kind === 'ref') {
-      if (d.name === target.refName) return;
-      // Default to merge — disambig popup (PLAN.md §4.4) is a later polish.
-      onQueueCommand({
-        kind: 'merge',
-        from: d.name,
-        into: target.refName,
-        ff: 'auto',
+        kind: 'checkout',
+        worktree: target.worktreePath,
+        target: targetSpec,
       });
     }
   }
@@ -508,15 +527,21 @@
       return {
         kind: 'preview commit',
         title: shortSha(c.sha),
-        body: `What ${c.subject || 'a queued operation'} would create. Synthesised by the simulator — nothing is actually written until you click Apply.`,
+        body: `Not real yet — this is what your queued commands would create. Hit Apply in the queue panel to actually run them, or remove the command from the queue to undo the preview.`,
       };
     }
+    const branchHint = c.refs.find((r) => r.kind === 'branch' || r.kind === 'head');
+    const where = branchHint?.name
+      ? `Sits on the ${branchHint.name} line.`
+      : 'Reachable from one of the visible branches.';
     return {
       kind: 'commit',
       title: shortSha(c.sha),
-      body: c.subject || '(no subject)',
+      body: `${where} ${c.subject || '(no subject)'}`,
       ...(onQueueCommand
-        ? { hint: 'Drag onto a branch label to queue a cherry-pick of this commit.' }
+        ? {
+            hint: 'Drop it on a branch label to copy this single commit there (cherry-pick) — the original stays put. Or drop it on a worktree card to check that worktree out at this exact commit.',
+          }
         : {}),
     };
   }
@@ -524,36 +549,40 @@
   function helpForRef(ref: RefDecoration): HelpContent {
     if (ref.kind === 'remote') {
       return {
-        kind: 'remote ref',
+        kind: 'remote',
         title: ref.name ?? '(unnamed)',
-        body: 'Where the remote branch was at the last fetch. Read-only — push to update it.',
+        body: 'A snapshot of how the remote saw this branch at your last fetch — not a live link. It changes locally only when you `git fetch` or after a successful `git push` updates the remote.',
       };
     }
     if (ref.kind === 'tag') {
       return {
         kind: 'tag',
         title: ref.name ?? '(unnamed)',
-        body: 'Annotated or lightweight git tag pointing at this commit.',
+        body: 'A named pointer to this exact commit. Tags don’t move when new commits land — useful for releases.',
       };
     }
     if (ref.kind === 'head') {
       return {
-        kind: 'head',
+        kind: 'HEAD',
         title: ref.name ?? 'detached',
         body: ref.name
-          ? `Currently checked out branch — HEAD points to "${ref.name}".`
-          : 'HEAD is detached — no branch is currently checked out.',
+          ? `“HEAD” is git-speak for what you have checked out right now. Currently it points at the ${ref.name} branch — meaning your next commit will land on ${ref.name}.`
+          : 'Detached: no branch is checked out. Commits made now would not be tracked by any branch.',
         ...(onQueueCommand
-          ? { hint: 'Drag onto another branch to queue a merge into it.' }
+          ? {
+              hint: 'Drag this label onto another branch to queue a merge of THIS branch into THAT one.',
+            }
           : {}),
       };
     }
     return {
       kind: 'branch',
       title: ref.name ?? '(unnamed)',
-      body: 'Local branch ref. Drop a commit here to cherry-pick onto it.',
+      body: `A local branch — your private name for this commit (and everything before it). Moves forward whenever you commit while it’s checked out. Push it to share with the remote.`,
       ...(onQueueCommand
-        ? { hint: 'Drag onto another branch to merge this one into it.' }
+        ? {
+            hint: 'Drag the label onto another branch to merge this one in. Drop a commit on the label to cherry-pick that commit onto this branch.',
+          }
         : {}),
     };
   }
@@ -563,22 +592,22 @@
       return {
         kind: 'background task',
         title: s.title,
-        body: 'Automated session — fired by a scheduled task, not started by you. Listed for completeness; not actionable from here.',
+        body: 'Not a chat — this session was opened by a scheduled task running in the background (e.g. a recurring health check). Useful as audit trail; nothing for you to do here.',
       };
     }
     if (s.source === 'command') {
       return {
-        kind: 'slash-command session',
+        kind: 'slash-command',
         title: s.title,
-        body: 'You started this session by running a slash-command. The first message is the command invocation, not a chat prompt.',
+        body: 'You started this by typing a /slash-command. The first “message” is the command invocation — not a real prompt — but the rest of the transcript is your back-and-forth with the agent.',
       };
     }
     return {
       kind: 'conversation',
       title: s.title,
       body: s.isLive
-        ? 'Active session — last write within the past two minutes.'
-        : `Idle conversation — last activity ${ageWords(s.lastActivity)} ago.`,
+        ? 'A Claude Code chat that wrote to disk in the last 2 minutes — almost certainly active right now in another window.'
+        : `A Claude Code chat. Last touched ${ageWords(s.lastActivity)} ago — open the session again from CCD if you want to keep going.`,
     };
   }
 
@@ -587,14 +616,18 @@
     const ahead = wt.status?.ahead ?? 0;
     const behind = wt.status?.behind ?? 0;
     const parts: string[] = [];
-    if (dirty === 0) parts.push('clean');
-    else parts.push(`${dirty} dirty file${dirty === 1 ? '' : 's'}`);
-    if (behind > 0) parts.push(`${behind} commit${behind === 1 ? '' : 's'} behind upstream`);
+    parts.push(dirty === 0 ? 'clean' : `${dirty} unstaged file${dirty === 1 ? '' : 's'}`);
+    if (behind > 0) parts.push(`${behind} commit${behind === 1 ? '' : 's'} behind ${wt.status?.upstream ?? 'upstream'}`);
     if (ahead > 0) parts.push(`${ahead} ahead`);
     return {
       kind: 'worktree',
       title: wt.path,
-      body: `Checked out on ${wt.branch ?? '(detached HEAD)'}. ${parts.join(', ')}.`,
+      body: `A checkout of this repo at ${wt.path}, currently on ${wt.branch ?? '(detached HEAD)'} (${parts.join(', ')}). Each worktree can be on a different branch — that’s how you run several AI agents in parallel without them stepping on each other.`,
+      ...(onQueueCommand
+        ? {
+            hint: 'Drop a branch label here to switch this worktree to that branch. Drop a commit dot to check this worktree out at that exact commit (detached HEAD).',
+          }
+        : {}),
     };
   }
 
@@ -608,23 +641,23 @@
 
   const FOLD_HELP: HelpContent = {
     kind: 'fold',
-    title: 'collapsed run',
-    body: 'A run of plain commits with no branches or worktrees attached has been folded to keep the graph scannable.',
-    hint: 'Click to expand. Click again on the chevron to fold back.',
+    title: 'plain commits',
+    body: 'These commits don’t have any branches, tags, or worktrees pointing at them — there’s nothing on them you can grab from here. They’re collapsed so the graph stays focused on the points where you can actually act.',
+    hint: 'Click anyway if you want to see them — e.g. to grab a single commit and cherry-pick it elsewhere.',
   };
 
   const TASK_FOLD_HELP: HelpContent = {
     kind: 'fold',
     title: 'background tasks',
-    body: 'Sessions started by scheduled tasks or other automation, not by you typing. Folded by default so they don’t crowd out real conversations.',
-    hint: 'Click to inspect — but you usually don’t need to.',
+    body: 'Hidden sessions started by automation — scheduled tasks, hooks, etc. Not real conversations. Always folded so a worktree with one human chat and 300 health-check fires shows the chat first.',
+    hint: 'Open it if you’re auditing what the scheduler did.',
   };
 
   const CONVERSATION_FOLD_HELP: HelpContent = {
     kind: 'fold',
     title: 'conversations',
-    body: 'AI sessions started by you — chats and slash-commands. Folded once there are several.',
-    hint: 'Click to expand.',
+    body: 'Folded because there are enough sessions here to clutter the card. The number is total — the “live” count is how many were active in the last 2 minutes.',
+    hint: 'Click to see them all.',
   };
 </script>
 
@@ -683,12 +716,18 @@
             r={HEAD_R + 4}
             fill={laneColor(r.commit.lane)}
             fill-opacity="0.18"
+            pointer-events="none"
           />
         {/if}
+        <!--
+          Visible commit dot. Kept tiny (r=4 / r=6) per PLAN.md §3.4 for
+          information density; click target is the invisible larger circle
+          drawn over it, so users don't have to be pixel-precise on a 8px
+          dot to start a drag.
+        -->
         <circle
           class="commit-dot"
           class:draggable={!r.commit.simulated && onQueueCommand}
-          role={!r.commit.simulated && onQueueCommand ? 'button' : 'img'}
           aria-label={shortSha(r.commit.sha)}
           cx={laneX(r.commit.lane)}
           cy={r.dotY}
@@ -698,10 +737,41 @@
           stroke-width={r.commit.simulated || isMerge(r.commit) ? 1.5 : 0}
           stroke-dasharray={r.commit.simulated ? '2 2' : undefined}
           opacity={r.commit.simulated ? 0.7 : 1}
-          onpointerdown={!r.commit.simulated && onQueueCommand ? (e) => onCommitPointerDown(r.commit, e) : undefined}
-          onmouseenter={(e) => showHelp(helpForCommit(r.commit), e)}
-          onmouseleave={hideHelp}
+          pointer-events="none"
         />
+        <!--
+          Invisible hit-area circle. ALL pointer / hover handlers attach
+          here, not on the visible dot. r=10 ≈ 20px diameter — small
+          enough to stay within a single lane (LANE_W=22), large enough
+          that imprecise clicks still register.
+        -->
+        {#if !r.commit.simulated && onQueueCommand}
+          <circle
+            class="commit-hit"
+            role="button"
+            tabindex="-1"
+            aria-label="Drag commit {shortSha(r.commit.sha)}"
+            cx={laneX(r.commit.lane)}
+            cy={r.dotY}
+            r="10"
+            fill="transparent"
+            onpointerdown={(e) => onCommitPointerDown(r.commit, e)}
+            onmouseenter={(e) => showHelp(helpForCommit(r.commit), e)}
+            onmouseleave={hideHelp}
+          />
+        {:else}
+          <circle
+            class="commit-hit-passive"
+            role="img"
+            aria-label={shortSha(r.commit.sha)}
+            cx={laneX(r.commit.lane)}
+            cy={r.dotY}
+            r="8"
+            fill="transparent"
+            onmouseenter={(e) => showHelp(helpForCommit(r.commit), e)}
+            onmouseleave={hideHelp}
+          />
+        {/if}
       {:else if !r.expanded}
         <!-- Folded run: short dashed segment so the lane stays visually continuous. -->
         <line
@@ -728,7 +798,7 @@
               <span
                 class={`ref ref-${ref.kind}`}
                 class:draggable={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')}
-                class:drop-active={dropTarget?.refName === ref.name && drag !== null}
+                class:drop-active={dropTarget?.kind === 'ref' && dropTarget.refName === ref.name && drag !== null}
                 role={onQueueCommand ? 'button' : undefined}
                 data-drop-ref={onQueueCommand ? ref.name : undefined}
                 onpointerdown={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')
@@ -782,7 +852,9 @@
     ></span>
     <div
       class="card-row"
+      class:drop-active={dropTarget?.kind === 'worktree' && dropTarget.worktreePath === card.worktree.path && drag !== null}
       style="top: {card.top}px;"
+      data-drop-worktree={onQueueCommand ? card.worktree.path : undefined}
       onmouseenter={(e) => showHelp(helpForWorktree(card.worktree), e)}
       onmouseleave={hideHelp}
       role="presentation"
@@ -866,15 +938,19 @@
       aria-hidden="true"
     >
       {#if drag.kind === 'commit'}
-        <span class="kind">cherry-pick</span>
+        <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : 'cherry-pick'}</span>
         <span class="ghost-label">{shortSha(drag.sha)}</span>
       {:else}
-        <span class="kind">merge</span>
+        <span class="kind">{dropTarget?.kind === 'worktree' ? 'checkout' : 'merge'}</span>
         <span class="ghost-label">{drag.name}</span>
       {/if}
       {#if dropTarget}
         <span class="arrow">→</span>
-        <span class="ghost-label target">{dropTarget.refName}</span>
+        <span class="ghost-label target">
+          {dropTarget.kind === 'ref'
+            ? dropTarget.refName
+            : (dropTarget.worktreePath.split(/[/\\]/).filter(Boolean).at(-1) ?? '')}
+        </span>
       {/if}
     </div>
   {/if}
@@ -955,23 +1031,28 @@
     box-shadow: 0 0 0 2px rgba(212, 165, 74, 0.16);
   }
 
-  .commit-dot.draggable {
+  /*
+   * Hover state: the invisible hit-circle catches the pointer, so we use
+   * the *adjacency* sibling selector to drive the visible dot's hover
+   * styling. The visible dot itself can't be hovered (pointer-events:
+   * none), but it sits next to the hit circle in DOM order.
+   */
+  .commit-hit {
     cursor: grab;
-    transition: transform 100ms ease, filter 100ms ease;
-    transform-origin: center;
-    /* SVG transforms work in user-space; transform-box ensures CSS
-       transform-origin: center actually centers on the circle, not on
-       the SVG origin. */
-    transform-box: fill-box;
   }
 
-  .commit-dot.draggable:hover {
-    transform: scale(1.6);
-    filter: drop-shadow(0 0 4px var(--branch-2));
-  }
-
-  .commit-dot.draggable:active {
+  .commit-hit:active {
     cursor: grabbing;
+  }
+
+  /* Mirror "this is interactive" feedback onto the visible dot underneath. */
+  svg :global(.commit-hit:hover) ~ :global(.commit-dot.draggable),
+  svg :global(.commit-dot.draggable):hover {
+    /* SVG-friendly: thicker stroke ring instead of CSS transform, so the
+       hit-test geometry doesn't shift while the dot is being grabbed. */
+    stroke: var(--branch-2);
+    stroke-width: 3;
+    filter: drop-shadow(0 0 3px var(--branch-2));
   }
 
   .ref.draggable {
@@ -981,6 +1062,11 @@
   .ref.draggable:hover {
     transform: translateY(-1px);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  }
+
+  .card-row.drop-active :global(.card) {
+    border-color: var(--success);
+    box-shadow: 0 0 0 2px rgba(109, 178, 109, 0.18);
   }
 
   .fold-row {
