@@ -225,3 +225,43 @@ export interface ApiRucksacks {
   tags: TagEntry[];
   reflog: ReflogEntry[];
 }
+
+// ── Activity & conflict detection ────────────────────────────────────────────
+
+export type ActivityKind = 'edit' | 'write' | 'read' | 'bash' | 'other';
+
+export interface ActivityEvent {
+  /** Provider's session id (matches Session.id). */
+  sessionId: string;
+  /** Worktree path the session lives in — matches Worktree.path. */
+  cwd: string;
+  /** Unix milliseconds — derived from JSONL `timestamp`. */
+  ts: number;
+  kind: ActivityKind;
+  /** Absolute path. Present for edit / write / read; absent for bash / other. */
+  file?: string;
+  /** Short label — bash command (first 60 chars) or tool name. */
+  label?: string;
+}
+
+export interface ConcurrentConflict {
+  kind: 'concurrent';
+  file: string;
+  /** Sessions that touched the file in the C1 window, newest first. */
+  sessions: { sessionId: string; ts: number }[];
+}
+
+export interface DivergenceConflict {
+  kind: 'divergence';
+  /** Local branch name. */
+  branch: string;
+  siblings: string[];
+  /** Files that overlap (capped at 20). */
+  overlap: string[];
+}
+
+export interface ActivitySnapshot {
+  events: ActivityEvent[];
+  concurrent: ConcurrentConflict[];
+  divergence: DivergenceConflict[];
+}
