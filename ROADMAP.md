@@ -5,6 +5,17 @@ gap analysis: what PLAN promised vs. what the codebase actually does,
 organised by priority. Items move out of this file (and into PLAN.md
 updates / commits) as they ship.
 
+**Multi-Agent Activity & Conflict Detection — SHIPPED.** Design:
+`docs/superpowers/specs/2026-04-26-multi-agent-activity-design.md`. Plan:
+`docs/superpowers/plans/2026-04-26-pass-1-and-activity.md`. Live activity
+feed in the rucksacks panel (4th section), inline `✎ file` on session
+pills, amber-pulse on C1 concurrent-edit conflicts, ⚠N badge on branch
+refs for C3 divergence. Backed by chokidar JSONL tail watcher,
+ring-buffer activity store, and an SSE stream at
+`/api/repos/:id/activity/stream` with auto-reconnect on the client. 34
+new vitest cases across 6 files (extract, store, conflicts, watcher
+plumbing, bus, manager).
+
 **Pass 1 closed** (`08f4717`): worktree drag source, stale-outline
 explanation, local vs remote ref distinction, hover-help audit,
 disambig popup §4.4, apply modal §4.5, push gesture (row 7), reset
@@ -163,8 +174,12 @@ label. We render the whole graph at once (no virtualisation past
 - **GitHub OAuth + PR overlay** (Evening 7). Needs an OAuth-app
   registration the codebase can't do on its own. Hooks left in `§8`
   endpoint stubs.
-- **File watching / SSE** (PLAN §6, §8). chokidar dependency exists;
-  no watcher yet, no /api/repos/:id/state/sse, no live UI updates.
+- **File watching / SSE for git state** (PLAN §6, §8). The activity
+  feature shipped its own JSONL watcher + `/api/repos/:id/activity/stream`
+  SSE endpoint, but the broader git-state SSE (graph / worktrees /
+  rucksacks pushed live on `.git/` change) is still missing. Today the
+  UI re-fetches on focus / interval. Reuse the chokidar wiring from
+  `src/server/activity/watcher.ts`.
 - **Codex CLI / Codex Desktop / Gemini CLI providers** (PLAN §7.4
   open question). Storage paths still unverified — need a system
   with each tool installed to confirm.
