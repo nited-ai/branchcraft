@@ -150,6 +150,8 @@ export class Simulator {
     switch (cmd.kind) {
       case 'merge':
         return this.applyMerge(state, cmd);
+      case 'squash-merge':
+        return this.applySquashMerge(state, cmd);
       case 'rebase':
         return this.applyRebase(state, cmd);
       case 'cherry-pick':
@@ -197,6 +199,36 @@ export class Simulator {
       next.commits.set(m.sha, m);
       setRef(next, cmd.into, m.sha);
     }
+    return next;
+  }
+
+  private applySquashMerge(
+    state: SimState,
+    cmd: Extract<Command, { kind: 'squash-merge' }>,
+  ): SimState {
+    const fromSha = resolveRef(state, cmd.from);
+    const intoSha = resolveRef(state, cmd.into);
+    if (!fromSha || !intoSha || fromSha === intoSha) return state;
+    if (isAncestor(state, intoSha, fromSha)) {
+      // Squash where source is ahead of target: still synthesize a single
+      // commit on top of `into` carrying the combined work. Result is a
+      // linear history with one new commit, NOT a fast-forward.
+      const next = cloneState(state);
+      const c = this.synth([intoSha], `Squash merge ${cmd.from} into ${cmd.into}`);
+      next.commits.set(c.sha, c);
+      setRef(next, cmd.into, c.sha);
+      return next;
+    }
+    if (isAncestor(state, fromSha, intoSha)) {
+      // Source is already in target's history; nothing to squash.
+      return state;
+    }
+    // Diverged: synthesize a single non-merge commit on `into`. `from` stays
+    // unchanged — that's the defining difference vs. real merge.
+    const next = cloneState(state);
+    const c = this.synth([intoSha], `Squash merge ${cmd.from} into ${cmd.into}`);
+    next.commits.set(c.sha, c);
+    setRef(next, cmd.into, c.sha);
     return next;
   }
 

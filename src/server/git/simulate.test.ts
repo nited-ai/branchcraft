@@ -92,6 +92,50 @@ describe('Simulator.applyMerge', () => {
   });
 });
 
+describe('Simulator.applySquashMerge', () => {
+  it('produces a single non-merge commit on `into`', () => {
+    let commits = [
+      commit('R', []),
+      commit('A', ['R']),
+      commit('B', ['R']),
+    ];
+    commits = ref(commits, 'A', 'branch', 'main');
+    commits = ref(commits, 'B', 'branch', 'feat');
+    const sim = new Simulator({ seed: 'test' });
+    const state = buildSimState(commits);
+    const next = sim.apply(state, { kind: 'squash-merge', from: 'feat', into: 'main' });
+    const tip = next.commits.get(refSha(next, 'main')!)!;
+    expect(tip.parents).toHaveLength(1); // single parent — NOT a merge commit
+    expect(tip.parents[0]).toBe('A');
+    expect(tip.simulated).toBe(true);
+    // feat is unchanged — squash does NOT advance the source.
+    expect(refSha(next, 'feat')).toBe('B');
+  });
+
+  it('refuses when from is already ancestor of into (nothing to squash)', () => {
+    let commits = [commit('A', []), commit('B', ['A']), commit('C', ['B'])];
+    commits = ref(commits, 'B', 'branch', 'feat');
+    commits = ref(commits, 'C', 'branch', 'main');
+    const sim = new Simulator({ seed: 'test' });
+    const state = buildSimState(commits);
+    const out = sim.apply(state, { kind: 'squash-merge', from: 'feat', into: 'main' });
+    expect(refSha(out, 'main')).toBe('C'); // unchanged
+  });
+
+  it('handles ancestor case (from is ahead) by creating a fresh commit on top of into', () => {
+    let commits = [commit('A', []), commit('B', ['A']), commit('C', ['B'])];
+    commits = ref(commits, 'A', 'branch', 'main');
+    commits = ref(commits, 'C', 'branch', 'feat');
+    const sim = new Simulator({ seed: 'test' });
+    const state = buildSimState(commits);
+    const next = sim.apply(state, { kind: 'squash-merge', from: 'feat', into: 'main' });
+    const tip = next.commits.get(refSha(next, 'main')!)!;
+    expect(tip.parents).toHaveLength(1);
+    expect(tip.parents[0]).toBe('A'); // grafted onto main, not feat
+    expect(tip.simulated).toBe(true);
+  });
+});
+
 describe('Simulator.applyRebase', () => {
   it('replays commits since merge-base on top of onto', () => {
     // R - M (main)

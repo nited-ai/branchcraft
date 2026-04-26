@@ -14,7 +14,7 @@
   // The form only supports the kinds the user can sensibly fill out via
   // text inputs. `checkout` is reachable via drag-on-worktree and isn't
   // exposed here — picking a worktree as a target is a drag-only gesture.
-  type Kind = Exclude<Command['kind'], 'checkout'>;
+  type Kind = Exclude<Command['kind'], 'checkout' | 'squash-merge'>;
   let kind = $state<Kind>('reset');
 
   // Per-kind fields. Kept loose; we only validate on submit.

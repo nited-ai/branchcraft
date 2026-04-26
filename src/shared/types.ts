@@ -152,6 +152,14 @@ export type RefName = string;
 
 export type Command =
   | { kind: 'merge'; from: RefName; into: RefName; ff?: 'auto' | 'only' | 'no' }
+  | {
+      /** Combine all of `from`'s new history into a single non-merge commit
+       *  on `into`. Unlike merge, no merge-link is created — `from` stays
+       *  unchanged and the squash commit looks like a hand-written one. */
+      kind: 'squash-merge';
+      from: RefName;
+      into: RefName;
+    }
   | { kind: 'rebase'; branch: RefName; onto: Sha | RefName }
   | { kind: 'cherry-pick'; commits: Sha[]; onto: RefName }
   | {

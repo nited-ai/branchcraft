@@ -50,6 +50,20 @@ async function execCommand(
       args.push(cmd.from);
       return { output: await runGit(cwd, args) };
     }
+    case 'squash-merge': {
+      const cwd = await findWorktreeForBranch(opts.repoPath, cmd.into);
+      // `git merge --squash <from>` stages the squashed result without committing,
+      // then we commit with a generic message. The user can amend after if they
+      // want a custom message; PLAN §4.5 envisages an apply-modal that captures
+      // a custom message — that lands in a later pass.
+      const squashOutput = await runGit(cwd, ['merge', '--squash', cmd.from]);
+      const commitOutput = await runGit(cwd, [
+        'commit',
+        '-m',
+        `Squash merge ${cmd.from} into ${cmd.into}`,
+      ]);
+      return { output: [squashOutput, commitOutput].filter(Boolean).join('\n') };
+    }
     case 'rebase': {
       const cwd = await findWorktreeForBranch(opts.repoPath, cmd.branch);
       const args = ['rebase', String(cmd.onto)];

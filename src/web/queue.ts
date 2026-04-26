@@ -11,6 +11,8 @@ export function commandSummary(cmd: Command): string {
       const ff = cmd.ff && cmd.ff !== 'auto' ? ` (--ff-${cmd.ff})` : '';
       return `merge ${cmd.from} → ${cmd.into}${ff}`;
     }
+    case 'squash-merge':
+      return `squash-merge ${cmd.from} → ${cmd.into}`;
     case 'rebase':
       return `rebase ${cmd.branch} onto ${cmd.onto}`;
     case 'cherry-pick': {
@@ -46,6 +48,8 @@ export function commandSummary(cmd: Command): string {
 export const COMMAND_BLURB: Record<Command['kind'], string> = {
   merge:
     'Combines another branch into this one. Fast-forwards if possible, otherwise creates a merge commit.',
+  'squash-merge':
+    'Combines another branch\'s history into a single new commit on this one — like merge, but with no merge link. The source branch is unchanged.',
   rebase:
     'Replays this branch’s commits on top of another, rewriting their SHAs. Linear history, but force-push needed if shared.',
   'cherry-pick':

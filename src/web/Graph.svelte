@@ -1003,9 +1003,7 @@
       } else if (c === 'rebase') {
         onQueueCommand({ kind: 'rebase', branch: disambig.fromName, onto: disambig.intoName });
       } else if (c === 'squash') {
-        // Squash uses merge with --squash semantics; reuse merge command with ff='no' as a stand-in
-        // until a dedicated squash command is added in a later pass.
-        onQueueCommand({ kind: 'merge', from: disambig.fromName, into: disambig.intoName, ff: 'no' });
+        onQueueCommand({ kind: 'squash-merge', from: disambig.fromName, into: disambig.intoName });
       }
       disambig = null;
     }}
