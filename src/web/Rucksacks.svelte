@@ -1,25 +1,31 @@
 <script lang="ts">
-  import type { ApiRucksacks } from '../shared/types.ts';
+  import type { ApiRucksacks, ActivityEvent } from '../shared/types.ts';
+  import ActivityFeed from './ActivityFeed.svelte';
 
   type Props = {
     data: ApiRucksacks | null;
     loading: boolean;
     collapsed: boolean;
     onToggleCollapse: () => void;
+    /** Live activity events for the active repo. */
+    activityEvents: ActivityEvent[];
+    /** Caller wires to scroll-and-flash the matching session pill. */
+    onActivityClick?: (e: ActivityEvent) => void;
   };
-  let { data, loading, collapsed, onToggleCollapse }: Props = $props();
+  let { data, loading, collapsed, onToggleCollapse, activityEvents, onActivityClick }: Props = $props();
 
   // Each section is independently collapsible — state remembered in
   // localStorage per-section so a user's layout survives reloads. Stash is
   // open by default since it's the most actionable; tags/reflog stay closed
   // unless populated to keep the panel compact.
-  type SectionKey = 'stash' | 'tags' | 'reflog';
+  type SectionKey = 'stash' | 'tags' | 'reflog' | 'activity';
   const STORAGE_KEY = 'branchcraft.rucksacks.open';
 
   let open = $state<Record<SectionKey, boolean>>({
     stash: true,
     tags: false,
     reflog: false,
+    activity: true,
   });
 
   // Hydrate from localStorage on mount via $effect — runs once and on
@@ -35,6 +41,7 @@
           if (typeof parsed.stash === 'boolean') open.stash = parsed.stash;
           if (typeof parsed.tags === 'boolean') open.tags = parsed.tags;
           if (typeof parsed.reflog === 'boolean') open.reflog = parsed.reflog;
+          if (typeof parsed.activity === 'boolean') open.activity = parsed.activity;
         }
       } catch {
         // ignore — fall back to defaults
@@ -186,6 +193,13 @@
       </div>
     {/if}
   </section>
+
+  <ActivityFeed
+    events={activityEvents}
+    open={open.activity}
+    onToggleOpen={() => (open.activity = !open.activity)}
+    {...onActivityClick ? { onClickEvent: onActivityClick } : {}}
+  />
 </aside>
 {/if}
 

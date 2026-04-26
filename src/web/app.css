@@ -94,3 +94,22 @@ a:hover {
   background: var(--branch-2);
   color: var(--bg);
 }
+
+.flash-target {
+  animation: bc-flash 700ms ease-out;
+}
+@keyframes bc-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(212, 165, 74, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(212, 165, 74, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flash-target {
+    animation: none;
+    outline: 2px solid var(--branch-2);
+    outline-offset: 2px;
+  }
+}

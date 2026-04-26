@@ -479,6 +479,16 @@
     loading={rucksacksLoading}
     collapsed={rucksacksCollapsed}
     onToggleCollapse={toggleRucksacks}
+    {activityEvents}
+    onActivityClick={(e) => {
+      // Jump-and-flash. The Graph component renders SessionPill with data-session-id.
+      const pill = document.querySelector(`[data-session-id="${CSS.escape(e.sessionId)}"]`);
+      if (pill instanceof HTMLElement) {
+        pill.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        pill.classList.add('flash-target');
+        setTimeout(() => pill.classList.remove('flash-target'), 700);
+      }
+    }}
   />
 </div>
 

@@ -25,7 +25,7 @@
   let ageLabel = $derived(age(session.lastActivity));
 </script>
 
-<div class="pill" class:live={session.isLive} title={session.title}>
+<div class="pill" class:live={session.isLive} data-session-id={session.id} title={session.title}>
   <span class={`dot ${session.isLive ? 'dot-live' : 'dot-idle'}`} aria-hidden="true"></span>
   <span class="badge mono">{badge}</span>
   <span class="sid mono">{shortId}</span>
