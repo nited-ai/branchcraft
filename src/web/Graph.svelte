@@ -616,7 +616,13 @@
     position: absolute;
     top: 0;
     left: 0;
-    pointer-events: none;
+    /*
+     * Critical: SVG children (commit dots) need to receive pointer events
+     * so users can click and drag them. We previously had `pointer-events:
+     * none` here as defensive overflow protection, but that silently
+     * disabled dragging — labels live to the RIGHT of the SVG (left:
+     * var(--svg-w)) and don't overlap, so the protection isn't needed.
+     */
   }
 
   .labels {
@@ -677,6 +683,30 @@
 
   .commit-dot.draggable {
     cursor: grab;
+    transition: transform 100ms ease, filter 100ms ease;
+    transform-origin: center;
+    /* SVG transforms work in user-space; transform-box ensures CSS
+       transform-origin: center actually centers on the circle, not on
+       the SVG origin. */
+    transform-box: fill-box;
+  }
+
+  .commit-dot.draggable:hover {
+    transform: scale(1.6);
+    filter: drop-shadow(0 0 4px var(--branch-2));
+  }
+
+  .commit-dot.draggable:active {
+    cursor: grabbing;
+  }
+
+  .ref.draggable {
+    transition: transform 100ms ease, box-shadow 100ms ease;
+  }
+
+  .ref.draggable:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   }
 
   .fold-row {
