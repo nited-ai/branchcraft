@@ -679,6 +679,15 @@
   function assertNever(_: never): never {
     throw new Error('unreachable');
   }
+
+  // First slash separates the remote name from the branch path.
+  // `origin/main` → { remote: 'origin', rest: 'main' }
+  // `origin/feat/x` → { remote: 'origin', rest: 'feat/x' }
+  function splitRemoteRef(name: string): { remote: string; rest: string } {
+    const i = name.indexOf('/');
+    if (i < 0) return { remote: '', rest: name };
+    return { remote: name.slice(0, i), rest: name.slice(i + 1) };
+  }
 </script>
 
 <div
@@ -815,18 +824,29 @@
           <span class="sha mono">{shortSha(r.commit.sha)}</span>
           {#each r.commit.refs as ref (ref.kind + (ref.name ?? ''))}
             {#if ref.name}
-              <span
-                class={`ref ref-${ref.kind}`}
-                class:draggable={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')}
-                class:drop-active={dropTarget?.kind === 'ref' && dropTarget.refName === ref.name && drag !== null}
-                role={onQueueCommand ? 'button' : undefined}
-                data-drop-ref={onQueueCommand ? ref.name : undefined}
-                onpointerdown={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')
-                  ? (e) => onRefPointerDown(ref.name!, e)
-                  : undefined}
-                onmouseenter={(e) => showHelp(helpForRef(ref), e)}
-                onmouseleave={hideHelp}
-              >{ref.name}</span>
+              {#if ref.kind === 'remote'}
+                {@const split = splitRemoteRef(ref.name)}
+                <span
+                  class={`ref ref-${ref.kind}`}
+                  class:drop-active={dropTarget?.kind === 'ref' && dropTarget.refName === ref.name && drag !== null}
+                  data-drop-ref={onQueueCommand ? ref.name : undefined}
+                  onmouseenter={(e) => showHelp(helpForRef(ref), e)}
+                  onmouseleave={hideHelp}
+                ><span class="remote-prefix">{split.remote}/</span>{split.rest}</span>
+              {:else}
+                <span
+                  class={`ref ref-${ref.kind}`}
+                  class:draggable={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')}
+                  class:drop-active={dropTarget?.kind === 'ref' && dropTarget.refName === ref.name && drag !== null}
+                  role={onQueueCommand ? 'button' : undefined}
+                  data-drop-ref={onQueueCommand ? ref.name : undefined}
+                  onpointerdown={onQueueCommand && (ref.kind === 'branch' || ref.kind === 'head')
+                    ? (e) => onRefPointerDown(ref.name!, e)
+                    : undefined}
+                  onmouseenter={(e) => showHelp(helpForRef(ref), e)}
+                  onmouseleave={hideHelp}
+                >{ref.name}</span>
+              {/if}
             {/if}
           {/each}
           <span class="subject">{r.commit.subject}</span>
@@ -1168,6 +1188,15 @@
   .ref-remote {
     color: var(--text-secondary);
     border-style: dashed;
+    /* Slightly tint the bg so even at a glance you can see "this isn't local". */
+    background: rgba(138, 150, 168, 0.06);
+  }
+
+  .ref-remote .remote-prefix {
+    color: var(--branch-7);
+    font-weight: 600;
+    margin-right: 1px;
+    opacity: 0.85;
   }
 
   .subject {
