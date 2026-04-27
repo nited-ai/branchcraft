@@ -58,11 +58,19 @@
     | null;
   let drag = $state<Drag>(null);
   let dragCursor = $state({ x: 0, y: 0 });
+  /**
+   * Page-coordinates of the pointerdown that started the drag. The preview
+   * line is anchored here on one end and at `dropTargetXY` (snapped to the
+   * resolved target's center) or `dragCursor` (free-floating) on the other.
+   */
+  let dragSourceXY = $state<{ x: number; y: number } | null>(null);
   type DropTarget =
     | { kind: 'ref'; refName: string }
     | { kind: 'worktree'; worktreePath: string }
     | { kind: 'commit'; sha: string };
   let dropTarget = $state<DropTarget | null>(null);
+  /** Page-coordinates of the snapped drop target's center, when one is hit. */
+  let dropTargetXY = $state<{ x: number; y: number } | null>(null);
 
   type ResetPopup = { branch: string; sha: string; x: number; y: number };
   let resetPopup = $state<ResetPopup | null>(null);
@@ -484,6 +492,8 @@
     if (!onQueueCommand) return;
     drag = d;
     dragCursor = { x: e.clientX, y: e.clientY };
+    dragSourceXY = { x: e.clientX, y: e.clientY };
+    dropTargetXY = null;
     e.preventDefault();
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
@@ -493,14 +503,17 @@
     dragCursor = { x: e.clientX, y: e.clientY };
     const els = document.elementsFromPoint(e.clientX, e.clientY);
     let found: DropTarget | null = null;
+    let foundEl: Element | null = null;
     for (const el of els) {
       if (!(el instanceof HTMLElement)) continue;
       if (el.dataset.dropRef) {
         found = { kind: 'ref', refName: el.dataset.dropRef };
+        foundEl = el;
         break;
       }
       if (el.dataset.dropWorktree) {
         found = { kind: 'worktree', worktreePath: el.dataset.dropWorktree };
+        foundEl = el;
         break;
       }
     }
@@ -510,11 +523,18 @@
         const sha = el instanceof Element ? el.getAttribute('data-drop-commit-sha') : null;
         if (sha) {
           found = { kind: 'commit', sha };
+          foundEl = el;
           break;
         }
       }
     }
     dropTarget = found;
+    if (foundEl) {
+      const r = foundEl.getBoundingClientRect();
+      dropTargetXY = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    } else {
+      dropTargetXY = null;
+    }
   }
 
   function onPointerUp() {
@@ -524,6 +544,8 @@
     const d = drag;
     drag = null;
     dropTarget = null;
+    dragSourceXY = null;
+    dropTargetXY = null;
     if (!target || !d || !onQueueCommand) return;
 
     if (target.kind === 'ref') {
@@ -668,6 +690,69 @@
     // Left button only — middle/right click is for the OS / app menus.
     if (e.button !== 0) return;
     startDrag({ kind: 'worktree', path: wt.path, branch: wt.branch }, e);
+  }
+
+  /**
+   * The whole right-side label row is a drag handle for cherry-pick when the
+   * commit is real and dispatch is wired. Ref pills inside the row have their
+   * own pointerdown — bail out if the press originated on one so the ref
+   * drag (merge / push / etc.) keeps working.
+   */
+  function onCommitRowPointerDown(c: LaidOutCommit, e: PointerEvent) {
+    if (e.button !== 0) return;
+    if (c.simulated) return;
+    if (e.target instanceof Element && e.target.closest('.ref, .ref-badge')) return;
+    startDrag({ kind: 'commit', sha: c.sha, subject: c.subject }, e);
+  }
+
+  /**
+   * Predicted operation for the in-progress drag — drives the preview-line
+   * colour and label. Mirrors the resolution in onPointerUp; keep them in
+   * sync when adding new gestures.
+   */
+  type PreviewOp = 'cherry-pick' | 'checkout' | 'merge' | 'push' | 'reset' | 'rebase' | 'invalid';
+  let previewOp = $derived.by<PreviewOp>(() => {
+    if (!drag || !dropTarget) return 'invalid';
+    if (dropTarget.kind === 'ref') {
+      if (drag.kind === 'commit') return 'cherry-pick';
+      if (drag.kind === 'worktree') return 'checkout';
+      if (drag.kind === 'ref') {
+        if (drag.name === dropTarget.refName) return 'invalid';
+        return refKindByName.get(dropTarget.refName) === 'remote' && refKindByName.get(drag.name) !== 'remote'
+          ? 'push'
+          : 'merge';
+      }
+    } else if (dropTarget.kind === 'worktree') {
+      if (drag.kind === 'commit' || drag.kind === 'ref') return 'checkout';
+      return 'invalid';
+    } else if (dropTarget.kind === 'commit') {
+      if (drag.kind === 'ref') return 'reset';
+      return 'invalid';
+    }
+    return 'invalid';
+  });
+
+  /** CSS variable name for the preview line stroke. Each op gets a hue
+      that matches the eventual queue badge / apply outcome. */
+  const PREVIEW_COLOR: Record<PreviewOp, string> = {
+    'cherry-pick': 'var(--branch-2)',
+    checkout: 'var(--branch-0)',
+    merge: 'var(--branch-2)',
+    push: 'var(--success)',
+    reset: 'var(--warning)',
+    rebase: 'var(--branch-3)',
+    invalid: 'var(--text-secondary)',
+  };
+
+  /**
+   * Cubic Bézier with control points pulled vertically — same shape as the
+   * graph's regular edges, so the preview reads as a "future edge" rather
+   * than a generic arrow.
+   */
+  function previewPath(x1: number, y1: number, x2: number, y2: number): string {
+    const dy = y2 - y1;
+    const c = Math.max(40, Math.abs(dy) * 0.35);
+    return `M ${x1} ${y1} C ${x1} ${y1 + c}, ${x2} ${y2 - c}, ${x2} ${y2}`;
   }
 
   // ── Help-content builders ────────────────────────────────────────────────
@@ -961,7 +1046,14 @@
   <ol class="labels">
     {#each rows as r (r.kind === 'commit' ? r.commit.sha : `${r.key}#${r.expanded ? 'x' : 'c'}`)}
       {#if r.kind === 'commit'}
-        <li style="top: {r.top}px; height: {ROW_H}px;">
+        <li
+          style="top: {r.top}px; height: {ROW_H}px;"
+          class:draggable={!r.commit.simulated && onQueueCommand}
+          onpointerdown={!r.commit.simulated && onQueueCommand
+            ? (e) => onCommitRowPointerDown(r.commit, e)
+            : undefined}
+          role="presentation"
+        >
           <span class="sha mono">{shortSha(r.commit.sha)}</span>
           {#each r.commit.refs as ref (ref.kind + (ref.name ?? ''))}
             {#if ref.name}
@@ -1185,6 +1277,31 @@
 
   <ContextHelp content={helpContent} x={cursorPos.x} y={cursorPos.y} />
 
+  {#if drag && dragSourceXY}
+    {@const endXY = dropTargetXY ?? dragCursor}
+    {@const stroke = PREVIEW_COLOR[previewOp]}
+    <svg
+      class="drag-preview"
+      aria-hidden="true"
+      width="100%"
+      height="100%"
+    >
+      <path
+        d={previewPath(dragSourceXY.x, dragSourceXY.y, endXY.x, endXY.y)}
+        fill="none"
+        stroke={stroke}
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-dasharray="6 5"
+        opacity={previewOp === 'invalid' ? 0.35 : 0.85}
+      />
+      <circle cx={dragSourceXY.x} cy={dragSourceXY.y} r="4" fill={stroke} opacity="0.9" />
+      {#if dropTargetXY}
+        <circle cx={endXY.x} cy={endXY.y} r="6" fill="none" stroke={stroke} stroke-width="2" />
+      {/if}
+    </svg>
+  {/if}
+
   {#if drag}
     <div
       class="drag-ghost mono"
@@ -1256,6 +1373,26 @@
     font-size: 13px;
     overflow: hidden;
     text-overflow: ellipsis;
+    border-radius: 4px;
+    transition: background 100ms ease;
+  }
+
+  /*
+   * The whole right-side row is a drag handle — sha + subject text were
+   * inert before, even though they're the visually dominant part of a
+   * commit row. Subtle hover bg signals "grabbable" without competing with
+   * the ref pills' own affordances.
+   */
+  .labels li.draggable {
+    cursor: grab;
+  }
+
+  .labels li.draggable:active {
+    cursor: grabbing;
+  }
+
+  .labels li.draggable:hover {
+    background: rgba(212, 165, 74, 0.05);
   }
 
   .sha {
@@ -1546,6 +1683,16 @@
     background: rgba(138, 150, 168, 0.12);
     border-color: rgba(138, 150, 168, 0.3);
     color: var(--branch-7);
+  }
+
+  .drag-preview {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 190;
+    overflow: visible;
   }
 
   .drag-ghost {
